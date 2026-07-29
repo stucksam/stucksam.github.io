@@ -1,63 +1,91 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="A practical guide to multi-head, multi-query, and multi-head latent attention." />
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <meta name="description" content="A practical guide to multi-head, multi-query, and multi-head latent attention."/>
     <title>Attention mechanisms — stucksam</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="../styles.css" />
-    <link rel="stylesheet" href="article.css" />
-  </head>
-  <body>
-    <header class="site-header article-header">
-      <a class="wordmark" href="../" aria-label="stucksam home"><span class="mark">∿</span> stucksam</a>
-      <a class="back-link" href="../">← All notes</a>
-    </header>
-    <main class="article">
-      <article>
+    <link rel="preconnect" href="https://fonts.googleapis.com"/>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap"
+          rel="stylesheet"/>
+    <link rel="stylesheet" href="../styles.css"/>
+    <link rel="stylesheet" href="article.css"/>
+</head>
+<body>
+<header class="site-header article-header">
+    <a class="wordmark" href="../" aria-label="stucksam home"><span class="mark">∿</span> stucksam</a>
+    <a class="back-link" href="../">← All notes</a>
+</header>
+<main class="article">
+    <article>
         <header class="article-hero">
-          <p class="eyebrow"><span></span> Foundations · explainer</p>
-          <p class="article-kicker">The mechanism that lets tokens consult one another.</p>
-          <h1>Attention<br /><em>mechanisms</em></h1>
-          <p class="article-dek">From multi-head attention to the KV-cache-conscious designs behind fast modern language models: MQA and MLA.</p>
-          <div class="article-meta"><span>12 min read</span><span>Updated Jul 2026</span></div>
+            <p class="eyebrow"><span></span> Foundations · explainer</p>
+            <p class="article-kicker">The mechanism that lets tokens consult one another.</p>
+            <h1>Attention<br/><em>mechanisms</em></h1>
+            <p class="article-dek">From multi-head attention to the KV-cache-conscious designs behind fast modern
+                language models: MQA and MLA.</p>
+            <div class="article-meta"><span>12 min read</span><span>Updated Jul 2026</span></div>
         </header>
 
         <div class="article-layout">
-          <aside class="toc" aria-label="Table of contents">
-            <p>ON THIS PAGE</p>
-            <a href="#why">Why attention?</a>
-            <a href="#mha">Multi-head attention</a>
-            <a href="#mqa">Multi-query attention</a>
-            <a href="#mla">Multi-head latent attention</a>
-            <a href="#compare">Comparison</a>
-          </aside>
+            <aside class="toc" aria-label="Table of contents">
+                <p>ON THIS PAGE</p>
+                <a href="#why">Why attention?</a>
+                <a href="#mha">Multi-head attention</a>
+                <a href="#mqa">Multi-query attention</a>
+                <a href="#mla">Multi-head latent attention</a>
+                <a href="#compare">Comparison</a>
+            </aside>
 
-          <div class="prose">
-            <p class="lead">Attention is a content-addressable lookup. For every token, a model decides which other tokens matter right now, then gathers information from them in proportion to that relevance.</p>
-            <div class="shape-key"><strong>Notation</strong><span>B batch</span><span>T sequence length</span><span>D model width</span><span>H query heads</span><span>d head width</span></div>
+            <div class="prose">
+                <p class="lead">Attention is a content-addressable lookup. For every token, a model decides which other
+                    tokens matter right now, then gathers information from them in proportion to that relevance.</p>
+                <div class="shape-key"><strong>Notation</strong><span>B batch</span><span>T sequence length</span><span>D model width</span><span>H query heads</span><span>d head width</span>
+                </div>
 
-            <h2 id="why">Why attention?</h2>
-            <p>A recurrent model carries a fixed-size summary forward through a sequence. Attention removes that bottleneck: each position can directly read from every earlier position. It is both wonderfully expressive and, for long sequences, expensive.</p>
-            <p>Each token produces three learned representations: a <strong>query</strong> that asks for information, a <strong>key</strong> that says what it can be matched on, and a <strong>value</strong> that carries the information to return.</p>
-            <p class="math-label">SCALED DOT-PRODUCT ATTENTION</p>
-            <div class="equation" aria-label="Scaled dot-product attention equation">
-              <span>Attention</span>(Q, K, V) = softmax<span class="fraction"><b>QK<sup>T</sup></b><i>√d<sub>k</sub></i></span> V
-            </div>
-            <p>The dot product between a query and every key produces relevance scores. Scaling by √d<sub>k</sub> keeps the softmax in a useful range; the resulting weights form a weighted sum of values.</p>
+                <h2 id="why">Why attention?</h2>
+                <p>A recurrent model carries a fixed-size summary forward through a sequence. Attention removes that
+                    bottleneck: each position can directly read from every earlier position. It is both wonderfully
+                    expressive and, for long sequences, expensive.</p>
+                <p>Each token produces three learned representations: a <strong>query</strong> that asks for
+                    information, a <strong>key</strong> that says what it can be matched on, and a
+                    <strong>value</strong> that carries the information to return.</p>
+                <p class="math-label">SCALED DOT-PRODUCT ATTENTION</p>
+                <div class="equation" aria-label="Scaled dot-product attention equation">
+                    <span>Attention</span>(Q, K, V) = softmax <span class="fraction"><span
+                        class="numerator">QK<sup>T</sup></span><span class="denominator">√d<sub>k</sub></span></span> V
+                </div>
+                <p>The dot product between a query and every key produces relevance scores. Scaling by √d<sub>k</sub>
+                    keeps the softmax in a useful range; the resulting weights form a weighted sum of values.</p>
 
-            <h2 id="mha">Multi-head attention</h2>
-            <p>One attention operation may only learn one kind of relationship. <strong>Multi-head attention (MHA)</strong> gives the model several smaller attention spaces, or heads, in parallel. A head may track syntax, an antecedent, or a nearby formatting pattern; the model is free to learn the division of labour.</p>
-            <div class="mechanism mha"><div><b>states</b><small>[B,T,D]</small></div><i>→</i><div class="head-stack"><b>Q₁ K₁ V₁</b><b>Q₂ K₂ V₂</b><b>Q₃ K₃ V₃</b><small>H independent heads</small></div><i>→</i><div><b>output</b><small>[B,T,D]</small></div></div>
-            <p>For each head h, the input X ∈ ℝ<sup>T×D</sup> is projected into query, key, and value vectors of width d = D/H. The independent head outputs are concatenated and projected back to width D:</p>
-            <p class="math-label">MULTI-HEAD ATTENTION</p>
-            <div class="equation compact-equation">Q<sub>h</sub>=XW<sub>h</sub><sup>Q</sup>, K<sub>h</sub>=XW<sub>h</sub><sup>K</sup>, V<sub>h</sub>=XW<sub>h</sub><sup>V</sup><br><span>head</span><sub>h</sub>=softmax<span class="fraction"><b>Q<sub>h</sub>K<sub>h</sub><sup>T</sup></b><i>√d</i></span>V<sub>h</sub> ; MHA=Concat(head<sub>1</sub>…head<sub>H</sub>)W<sup>O</sup></div>
-            <p>This implementation makes the tensor moves explicit: the projections become [B, H, T, d], then each token is prevented from reading future tokens by a causal mask.</p>
-            <p class="code-label">PYTORCH REFERENCE · MULTI-HEAD ATTENTION</p>
-            <pre><code>import math
+                <h2 id="mha">Multi-head attention</h2>
+                <p>One attention operation may only learn one kind of relationship. <strong>Multi-head attention
+                    (MHA)</strong> gives the model several smaller attention spaces, or heads, in parallel. A head may
+                    track syntax, an antecedent, or a nearby formatting pattern; the model is free to learn the division
+                    of labour.</p>
+                <div class="mechanism mha">
+                    <div class="diagram-node"><b>states</b><small>[B, T, D]</small></div>
+                    <i>→</i>
+                    <div class="diagram-node"><span
+                            class="head-stack"><b>Q₁ K₁ V₁</b><b>Q₂ K₂ V₂</b><b>Q₃ K₃ V₃</b></span><small>H independent
+                        heads</small></div>
+                    <i>→</i>
+                    <div class="diagram-node"><b>output</b><small>[B, T, D]</small></div>
+                </div>
+                <p>For each head h, the input X ∈ ℝ<sup>T×D</sup> is projected into query, key, and value vectors of
+                    width d = D/H. The independent head outputs are concatenated and projected back to width D:</p>
+                <p class="math-label">MULTI-HEAD ATTENTION</p>
+                <div class="equation compact-equation">Q<sub>h</sub>=XW<sub>h</sub><sup>Q</sup>,
+                    K<sub>h</sub>=XW<sub>h</sub><sup>K</sup>,
+                    V<sub>h</sub>=XW<sub>h</sub><sup>V</sup><br><span>head</span><sub>h</sub>=softmax <span
+                            class="fraction"><span class="numerator">Q<sub>h</sub>K<sub>h</sub><sup>T</sup></span><span
+                            class="denominator">√d</span></span>V<sub>h</sub><br>MHA=Concat(head<sub>1</sub>…head<sub>H</sub>)W<sup>O</sup>
+                </div>
+                <p>This implementation makes the tensor moves explicit: the projections become [B, H, T, d], then each
+                    token is prevented from reading future tokens by a causal mask.</p>
+                <p class="code-label">PYTORCH REFERENCE · MULTI-HEAD ATTENTION</p>
+                <pre><code>import math
 import torch
 from torch import nn
 
@@ -84,20 +112,38 @@ class MultiHeadAttention(nn.Module):
         y = weights @ v                                        # [B,H,T,d]
         y = y.transpose(1, 2).contiguous().view(B, T, D)
         return self.out(y)                                     # [B,T,D]</code></pre>
-            <div class="callout"><strong>The inference catch.</strong> During autoregressive generation, the model keeps past keys and values in a <em>KV cache</em>. With MHA this cache has one K and V vector per head, per past token, in every layer—so it grows quickly with context length.</div>
+                <div class="callout"><strong>The inference catch.</strong> During autoregressive generation, the model
+                    keeps past keys and values in a <em>KV cache</em>. With MHA this cache has one K and V vector per
+                    head, per past token, in every layer—so it grows quickly with context length.
+                </div>
+                <p></p>
 
-            <h2 id="mqa">Multi-query attention <span>(MQA)</span></h2>
-            <p>MQA keeps multiple query heads but shares <strong>one</strong> key head and <strong>one</strong> value head. Each query can still ask a distinct question, but all queries read from the same cached memory.</p>
-            <div class="mechanism mqa">
-              <div><b>Q₁</b><b>Q₂</b><b>Q₃</b><b>Q₄</b><small>many query heads</small></div><i>→</i><div><b class="shared">K</b><b class="shared">V</b><small>one shared KV head</small></div>
-            </div>
-            <p>This reduces KV-cache memory and cache bandwidth by approximately the number of heads. It is especially valuable at serving time, when memory movement often dominates the cost of producing the next token. The trade-off is capacity: query heads cannot retain independent views of the past.</p>
-            <p>MQA changes only the K and V projections. Queries retain H heads, while K and V each have one. The same cached K and V are used for every query head:</p>
-            <p class="math-label">MULTI-QUERY ATTENTION</p>
-            <div class="equation compact-equation">Q=XW<sup>Q</sup> ∈ ℝ<sup>T×H×d</sup> ; K=XW<sup>K</sup>, V=XW<sup>V</sup> ∈ ℝ<sup>T×1×d</sup><br><span>head</span><sub>h</sub>=softmax<span class="fraction"><b>Q<sub>h</sub>K<sup>T</sup></b><i>√d</i></span>V</div>
-            <p><code>expand</code> below creates a view—rather than H copies—of the shared K/V head. In a decode loop the cache itself is therefore H times smaller than MHA’s.</p>
-            <p class="code-label">PYTORCH REFERENCE · MULTI-QUERY ATTENTION</p>
-            <pre><code>import math
+                <h2 id="mqa">Multi-query attention <span>(MQA)</span></h2>
+                <p>MQA keeps multiple query heads but shares <strong>one</strong> key head and <strong>one</strong>
+                    value head. Each query can still ask a distinct question, but all queries read from the same cached
+                    memory.</p>
+                <div class="mechanism mqa">
+                    <div class="diagram-node"><span class="head-row"><b>Q₁</b><b>Q₂</b><b>Q₃</b><b>Q₄</b></span><small>many
+                        query heads</small></div>
+                    <i>→</i>
+                    <div class="diagram-node"><span class="head-row"><b class="shared">K</b><b
+                            class="shared">V</b></span><small>one shared KV head</small></div>
+                </div>
+                <p>This reduces KV-cache memory and cache bandwidth by approximately the number of heads. It is
+                    especially valuable at serving time, when memory movement often dominates the cost of producing the
+                    next token. The trade-off is capacity: query heads cannot retain independent views of the past.</p>
+                <p>MQA changes only the K and V projections. Queries retain H heads, while K and V each have one. The
+                    same cached K and V are used for every query head:</p>
+                <p class="math-label">MULTI-QUERY ATTENTION</p>
+                <div class="equation compact-equation">Q=XW<sup>Q</sup> ∈ ℝ<sup>T×H×d</sup><br>K=XW<sup>K</sup>,
+                    V=XW<sup>V</sup> ∈ ℝ<sup>T×1×d</sup><br><span>head</span><sub>h</sub>=softmax <span
+                            class="fraction"><span class="numerator">Q<sub>h</sub>K<sup>T</sup></span><span
+                            class="denominator">√d</span></span>V
+                </div>
+                <p><code>expand</code> below creates a view—rather than H copies—of the shared K/V head. In a decode
+                    loop the cache itself is therefore H times smaller than MHA’s.</p>
+                <p class="code-label">PYTORCH REFERENCE · MULTI-QUERY ATTENTION</p>
+                <pre><code>import math
 import torch
 from torch import nn
 
@@ -123,22 +169,46 @@ class MultiQueryAttention(nn.Module):
         y = scores.masked_fill(future, float("-inf")).softmax(-1) @ v
         y = y.transpose(1, 2).contiguous().view(B, T, D)
         return self.out(y)</code></pre>
-            <p><strong>Grouped-query attention (GQA)</strong> is the practical middle ground: it uses fewer KV heads than query heads, with each KV head shared by a group of queries. Many current models choose GQA rather than the full sharing of MQA.</p>
+                <p><strong>Grouped-query attention (GQA)</strong> is the practical middle ground: it uses fewer KV heads
+                    than query heads, with each KV head shared by a group of queries. Many current models choose GQA
+                    rather than the full sharing of MQA.</p>
 
-            <h2 id="mla">Multi-head latent attention <span>(MLA)</span></h2>
-            <p>DeepSeek’s MLA takes a different route. Rather than storing full keys and values—or simply sharing them—it first compresses each token’s KV state into a small <strong>latent vector</strong>. That latent is what enters the cache.</p>
-            <div class="mechanism mla">
-              <div><b>token state</b><small>h<sub>t</sub></small></div><i>→</i><div><b class="latent">KV latent</b><small>c<sub>t</sub><sup>KV</sup></small></div><i>→</i><div><b>K / V</b><small>reconstructed for heads</small></div>
-            </div>
-            <p>At a high level, MLA factorizes the usual key and value projections through this compact bottleneck. It can preserve richer head-specific information than MQA while caching far fewer numbers than MHA. Extra care is needed for positional encodings: applying RoPE to a compressed key naively breaks the ability to absorb projections. MLA therefore separates a small position-carrying key component from the compressed content component.</p>
-            <p class="math-label">LATENT KV COMPRESSION</p>
-            <div class="equation compact-equation"><span>c<sub>t</sub><sup>KV</sup></span> = W<sub>down</sub><sup>KV</sup> h<sub>t</sub> &nbsp;&nbsp; ; &nbsp;&nbsp; K<sub>t</sub>, V<sub>t</sub> = W<sub>up</sub><sup>K,V</sup> c<sub>t</sub><sup>KV</sup></div>
-            <p>More explicitly, split each head into content dimensions d<sub>c</sub> and RoPE dimensions d<sub>r</sub>. The cache holds the compact latent c<sup>KV</sup> and a small position-only key k<sup>R</sup>. A query is the concatenation q=[q<sup>C</sup>;q<sup>R</sup>] and likewise k=[k<sup>C</sup>;k<sup>R</sup>]. This keeps RoPE outside the compressed path.</p>
-            <p class="math-label">DECOUPLED POSITIONAL ENCODING</p>
-            <div class="equation compact-equation">c<sup>KV</sup>=W<sub>down</sub><sup>KV</sup>x ; k<sup>C</sup>=W<sub>up</sub><sup>K</sup>c<sup>KV</sup> ; v<sup>C</sup>=W<sub>up</sub><sup>V</sup>c<sup>KV</sup><br>q<sup>R</sup>=RoPE(W<sup>QR</sup>x) ; k<sup>R</sup>=RoPE(W<sup>KR</sup>x)</div>
-            <p>This pedagogical version reconstructs content K/V from the latent so that the computation is easy to follow. Production MLA can algebraically absorb some up-projections into the query path; the cache-saving structure remains the same.</p>
-            <p class="code-label">PYTORCH REFERENCE · MULTI-HEAD LATENT ATTENTION</p>
-            <pre><code>import math
+                <h2 id="mla">Multi-head latent attention <span>(MLA)</span></h2>
+                <p>DeepSeek’s MLA takes a different route. Rather than storing full keys and values—or simply sharing
+                    them—it first compresses each token’s KV state into a small <strong>latent vector</strong>. That
+                    latent is what enters the cache.</p>
+                <div class="mechanism mla">
+                    <div class="diagram-node"><b>token state</b><small>h<sub>t</sub></small></div>
+                    <i>→</i>
+                    <div class="diagram-node"><b class="latent">KV latent</b><small>c<sub>t</sub><sup>KV</sup></small>
+                    </div>
+                    <i>→</i>
+                    <div class="diagram-node"><b>K / V</b><small>reconstructed for heads</small></div>
+                </div>
+                <p>At a high level, MLA factorizes the usual key and value projections through this compact bottleneck.
+                    It can preserve richer head-specific information than MQA while caching far fewer numbers than MHA.
+                    Extra care is needed for positional encodings: applying RoPE to a compressed key naively breaks the
+                    ability to absorb projections. MLA therefore separates a small position-carrying key component from
+                    the compressed content component.</p>
+                <p class="math-label">LATENT KV COMPRESSION</p>
+                <div class="equation compact-equation"><span>c<sub>t</sub><sup>KV</sup></span> =
+                    W<sub>down</sub><sup>KV</sup> h<sub>t</sub> &nbsp;&nbsp; ; &nbsp;&nbsp; K<sub>t</sub>, V<sub>t</sub>
+                    = W<sub>up</sub><sup>K,V</sup> c<sub>t</sub><sup>KV</sup></div>
+                <p>More explicitly, split each head into content dimensions d<sub>c</sub> and RoPE dimensions
+                    d<sub>r</sub>. The cache holds the compact latent c<sup>KV</sup> and a small position-only key
+                    k<sup>R</sup>. A query is the concatenation q=[q<sup>C</sup>;q<sup>R</sup>] and likewise
+                    k=[k<sup>C</sup>;k<sup>R</sup>]. This keeps RoPE outside the compressed path.</p>
+                <p class="math-label">DECOUPLED POSITIONAL ENCODING</p>
+                <div class="equation compact-equation">c<sup>KV</sup>=W<sub>down</sub><sup>KV</sup>x ;
+                    k<sup>C</sup>=W<sub>up</sub><sup>K</sup>c<sup>KV</sup> ;
+                    v<sup>C</sup>=W<sub>up</sub><sup>V</sup>c<sup>KV</sup><br>q<sup>R</sup>=RoPE(W<sup>QR</sup>x) ;
+                    k<sup>R</sup>=RoPE(W<sup>KR</sup>x)
+                </div>
+                <p>This pedagogical version reconstructs content K/V from the latent so that the computation is easy to
+                    follow. Production MLA can algebraically absorb some up-projections into the query path; the
+                    cache-saving structure remains the same.</p>
+                <p class="code-label">PYTORCH REFERENCE · MULTI-HEAD LATENT ATTENTION</p>
+                <pre><code>import math
 import torch
 from torch import nn
 
@@ -182,16 +252,60 @@ class MultiHeadLatentAttention(nn.Module):
         y = torch.cat((y, torch.zeros_like(q_r)), -1).transpose(1,2).reshape(B,T,D)
         return self.out(y)</code></pre>
 
-            <h2 id="compare">Choosing an attention design</h2>
-            <div class="compare-wrap"><table><thead><tr><th>Design</th><th>KV cache</th><th>Head diversity</th><th>Typical use</th></tr></thead><tbody><tr><td><strong>MHA</strong></td><td>Large</td><td>Highest</td><td>Baseline / training</td></tr><tr><td><strong>MQA</strong></td><td>Very small</td><td>Lowest</td><td>Fast decoding</td></tr><tr><td><strong>GQA</strong></td><td>Medium</td><td>High</td><td>Modern LLM default</td></tr><tr><td><strong>MLA</strong></td><td>Small latent</td><td>High</td><td>Long-context efficiency</td></tr></tbody></table></div>
-            <p>These mechanisms solve the same operational problem: keep decoding fast as a sequence grows. MHA spends memory to maximize flexibility; MQA is a decisive compression; GQA chooses a compromise; MLA learns a compact memory representation. The best choice depends less on a single FLOP count than on the model’s context length, architecture, and serving hardware.</p>
+                <h2 id="compare">Choosing an attention design</h2>
+                <div class="compare-wrap">
+                    <table>
+                        <thead>
+                        <tr>
+                            <th>Design</th>
+                            <th>KV cache</th>
+                            <th>Head diversity</th>
+                            <th>Typical use</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        <tr>
+                            <td><strong>MHA</strong></td>
+                            <td>Large</td>
+                            <td>Highest</td>
+                            <td>Baseline / training</td>
+                        </tr>
+                        <tr>
+                            <td><strong>MQA</strong></td>
+                            <td>Very small</td>
+                            <td>Lowest</td>
+                            <td>Fast decoding</td>
+                        </tr>
+                        <tr>
+                            <td><strong>GQA</strong></td>
+                            <td>Medium</td>
+                            <td>High</td>
+                            <td>Modern LLM default</td>
+                        </tr>
+                        <tr>
+                            <td><strong>MLA</strong></td>
+                            <td>Small latent</td>
+                            <td>High</td>
+                            <td>Long-context efficiency</td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p>These mechanisms solve the same operational problem: keep decoding fast as a sequence grows. MHA
+                    spends memory to maximize flexibility; MQA is a decisive compression; GQA chooses a compromise; MLA
+                    learns a compact memory representation. The best choice depends less on a single FLOP count than on
+                    the model’s context length, architecture, and serving hardware.</p>
 
-            <hr />
-            <p class="sources"><strong>Further reading</strong><br /><a href="https://arxiv.org/abs/1706.03762">Attention Is All You Need</a> · <a href="https://arxiv.org/abs/1911.02150">Fast Transformer Decoding: One Write-Head is All You Need</a> · <a href="https://arxiv.org/abs/2405.04434">DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model</a></p>
-          </div>
+                <hr/>
+                <p class="sources"><strong>Further reading</strong><br/><a href="https://arxiv.org/abs/1706.03762">Attention
+                    Is All You Need</a> · <a href="https://arxiv.org/abs/1911.02150">Fast Transformer Decoding: One
+                    Write-Head is All You Need</a> · <a href="https://arxiv.org/abs/2405.04434">DeepSeek-V2: A Strong,
+                    Economical, and Efficient Mixture-of-Experts Language Model</a></p>
+            </div>
         </div>
-      </article>
-    </main>
-    <footer><a class="wordmark" href="../"><span class="mark">∿</span> stucksam</a><p>Notes on learning machines, in public.</p><span>© 2026</span></footer>
-  </body>
+    </article>
+</main>
+<footer><a class="wordmark" href="../"><span class="mark">∿</span> stucksam</a>
+    <p>Notes on learning machines, in public.</p><span>© 2026</span></footer>
+</body>
 </html>
