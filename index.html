@@ -1,5 +1,3 @@
----
----
 <!doctype html>
 <html lang="en">
 <head>
@@ -77,17 +75,35 @@
     <section class="recent-section" id="recent" aria-labelledby="recent-title">
         <div class="section-heading compact">
             <p class="eyebrow"><span></span> Fresh from the desk</p>
-            <div class="heading-row"><h2 id="recent-title">Recent notes</h2><a href="foundations/">Browse by topic
+            <div class="heading-row"><h2 id="recent-title">Recent notes</h2><a href="#all-notes">View all notes
                 <span>→</span></a></div>
         </div>
         <div class="note-list" id="all-notes">
-            {% assign recent_notes = site.pages | where: "note", true | sort: "date" | reverse %}
-            {% for note in recent_notes limit: 6 %}
-            <a class="note" href="{{ note.url | relative_url }}">
-                <span class="note-type">{{ note.note_type }}</span><span class="note-title">{{ note.title }}</span><span class="note-topic">{{ note.topic }}</span>
-                <time datetime="{{ note.date | date: '%Y-%m-%d' }}">{{ note.date | date: "%b ’%y" }}</time><span class="note-arrow">↗</span>
+            <a class="note" href="attention/">
+                <span class="note-type">EXPLAINER</span><span
+                    class="note-title">Attention mechanisms: MHA, MQA, and MLA</span><span class="note-topic">Foundations</span>
+                <time datetime="2026-07">Jul ’26</time>
+                <span class="note-arrow">↗</span>
             </a>
-            {% endfor %}
+            <a class="note" href="attention/">
+                <span class="note-type">PAPER</span><span class="note-title">Attention Is All You Need: a practical reading</span><span
+                    class="note-topic">Foundations</span>
+                <time datetime="2026-07">Jul ’26</time>
+                <span class="note-arrow">↗</span>
+            </a>
+            <a class="note" href="#">
+                <span class="note-type">EXPLAINER</span><span
+                    class="note-title">From waveform to words: modern ASR</span><span class="note-topic">Speech</span>
+                <time datetime="2026-06">Jun ’26</time>
+                <span class="note-arrow">↗</span>
+            </a>
+            <a class="note" href="attention/">
+                <span class="note-type">CODE</span><span
+                    class="note-title">Attention, built from first principles</span><span
+                    class="note-topic">Foundations</span>
+                <time datetime="2026-07">Jul ’26</time>
+                <span class="note-arrow">↗</span>
+            </a>
         </div>
     </section>
 

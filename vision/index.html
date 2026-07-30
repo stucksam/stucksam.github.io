@@ -1,4 +1,29 @@
----
-topic_name: Vision
----
-<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Vision & multimodal — stucksam</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap" rel="stylesheet"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../topics.css"></head><body><header class="site-header"><a class="wordmark" href="../"><span class="mark">∿</span> stucksam</a><a class="back-link" href="../">← All topics</a></header><main class="topic-page"><section class="topic-intro"><p class="eyebrow"><span></span> Topic 03</p><h1>Vision &amp;<br><em>multimodal</em></h1><p class="description">How models turn pixels into understanding—and combine vision, language, and sound.</p></section>{% assign topic_notes = site.pages | where: "note", true | where: "topic", page.topic_name | sort: "date" | reverse %}<p class="collection-label">{{ topic_notes.size }} NOTES</p>{% for note in topic_notes %}<a class="collection-note" href="{{ note.url | relative_url }}"><span class="type">{{ note.note_type }}</span><span class="title">{{ note.title }}</span><time datetime="{{ note.date | date: '%Y-%m-%d' }}">{{ note.date | date: "Jul ’%y" }}</time><span>↗</span></a>{% endfor %}{% if topic_notes.size == 0 %}<div class="empty-state"><span>·</span> This shelf is ready for its first note.</div>{% endif %}</main><footer class="topic-footer"><a class="wordmark" href="../"><span class="mark">∿</span> stucksam</a><p>Notes on learning machines, in public.</p><span>© 2026</span></footer></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <title>Vision & multimodal — stucksam</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap"
+          rel="stylesheet">
+    <link rel="stylesheet" href="../styles.css">
+    <link rel="stylesheet" href="../topics.css">
+</head>
+<body>
+<header class="site-header"><a class="wordmark" href="../"><span class="mark">∿</span> stucksam</a><a class="back-link"
+                                                                                                      href="../">← All
+    topics</a></header>
+<main class="topic-page">
+    <section class="topic-intro"><p class="eyebrow"><span></span> Topic 03</p>
+        <h1>Vision &amp;<br><em>multimodal</em></h1>
+        <p class="description">How models turn pixels into understanding—and combine vision, language, and sound.</p>
+    </section>
+    <p class="collection-label">NOTES</p>
+    <div class="empty-state"><span>·</span> This shelf is ready for its first note.</div>
+</main>
+<footer class="topic-footer"><a class="wordmark" href="../"><span class="mark">∿</span> stucksam</a>
+    <p>Notes on learning machines, in public.</p><span>© 2026</span></footer>
+</body>
+</html>
