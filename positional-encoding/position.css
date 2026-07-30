@@ -1,0 +1,246 @@
+.position-diagram {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 15px;
+    min-height: 126px;
+    margin: 28px 0 35px;
+    padding: 22px;
+    border: 1px solid var(--line);
+    background: #eeece5;
+    text-align: center;
+}
+
+.position-diagram > div {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+    position: relative;
+}
+
+.position-diagram b {
+    display: block;
+    min-width: 39px;
+    padding: 9px 7px;
+    background: var(--blue);
+    font: .75rem "DM Mono", monospace;
+}
+
+.position-diagram .pos {
+    background: var(--yellow);
+}
+
+.position-diagram .out {
+    min-width: 83px;
+    background: var(--coral);
+}
+
+.position-diagram small {
+    position: absolute;
+    top: 43px;
+    left: 50%;
+    white-space: nowrap;
+    transform: translateX(-50%);
+    color: var(--muted);
+    font: .6rem "DM Mono", monospace;
+}
+
+.position-diagram i {
+    color: var(--coral);
+    font-size: 1.35rem;
+    font-style: normal;
+}
+
+.relative b {
+    min-width: 54px;
+}
+
+.relative .out {
+    min-width: 72px;
+}
+
+.matrix {
+    display: inline-grid;
+    grid-template-columns:auto auto;
+    gap: 1px 12px;
+    padding: 0 12px;
+    vertical-align: middle;
+    line-height: 1.15;
+    position: relative;
+}
+
+.matrix:before, .matrix:after {
+    position: absolute;
+    top: -2px;
+    bottom: -2px;
+    font-size: 2.2rem;
+    line-height: .85;
+}
+
+.matrix:before {
+    content: "[";
+    left: 0;
+}
+
+.matrix:after {
+    content: "]";
+    right: 0;
+}
+
+.rotation-diagram {
+    position: relative;
+    width: 205px;
+    height: 190px;
+    margin: 26px auto 36px;
+    border: 1px solid var(--line);
+    background: #eeece5;
+    overflow: hidden;
+}
+
+.axis {
+    position: absolute;
+    background: #a8b1ac;
+}
+
+.x-axis {
+    left: 18px;
+    right: 18px;
+    top: 95px;
+    height: 1px;
+}
+
+.y-axis {
+    top: 18px;
+    bottom: 18px;
+    left: 101px;
+    width: 1px;
+}
+
+.ray {
+    position: absolute;
+    left: 101px;
+    top: 94px;
+    width: 70px;
+    height: 2px;
+    transform-origin: left center;
+}
+
+.ray-a {
+    background: var(--blue);
+    transform: rotate(-26deg);
+}
+
+.ray-b {
+    background: var(--coral);
+    transform: rotate(-68deg);
+}
+
+.rotation-diagram span {
+    position: absolute;
+    font: .67rem "DM Mono", monospace;
+}
+
+.origin {
+    left: 93px;
+    top: 98px;
+}
+
+.label-a {
+    right: 25px;
+    top: 54px;
+    color: #4a86af;
+}
+
+.label-b {
+    left: 108px;
+    top: 23px;
+    color: #c95242;
+}
+
+.arc {
+    left: 132px;
+    top: 58px;
+    color: var(--coral);
+}
+
+.nope-diagram {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 28px 0 35px;
+    padding: 27px 22px 18px;
+    border: 1px solid var(--line);
+    background: #eeece5;
+}
+
+.nope-diagram .token {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 7px;
+    min-width: 54px;
+    padding: 9px;
+    background: var(--blue);
+    font: .78rem "DM Mono", monospace;
+}
+
+.nope-diagram .token span {
+    font: .55rem "DM Mono", monospace;
+    white-space: nowrap;
+}
+
+.nope-diagram p {
+    width: 100%;
+    margin: 12px 0 0 !important;
+    color: var(--muted);
+    text-align: center;
+    font: .62rem "DM Mono", monospace;
+}
+
+@media (max-width: 530px) {
+    .position-diagram {
+        gap: 6px;
+        padding: 20px 5px
+    }
+
+    .position-diagram b {
+        min-width: 28px;
+        font-size: .62rem
+    }
+
+    .position-diagram .out {
+        min-width: 59px
+    }
+
+    .position-diagram small {
+        font-size: .45rem
+    }
+
+    .relative {
+        gap: 4px
+    }
+
+    .relative b {
+        min-width: 38px
+    }
+
+    .relative .out {
+        min-width: 55px
+    }
+
+    .matrix {
+        gap: 1px 7px;
+        padding: 0 9px
+    }
+
+    .nope-diagram {
+        gap: 5px;
+        padding: 25px 8px 15px
+    }
+
+    .nope-diagram .token {
+        min-width: 47px
+    }
+}
