@@ -36,10 +36,283 @@
                 <div class="shape-key"><strong>Notation</strong><span>t position</span><span>D model width</span><span>H heads</span><span>d head width</span><span>Δ relative offset</span>
                 </div>
                 <h2 id="need">Why position exists at all</h2>
-                <p>Self-attention is permutation equivariant: permute every input row and the outputs permute in exactly
-                    the same way. That is useful for sets, but language is ordered. Positional methods break this
-                    symmetry by changing the token representation, changing the attention score, or relying on an
-                    architectural signal that already carries order.</p>
+                <p>Attention can tell which words are present, but not their order. Without extra information, it would
+                    treat <em>“dog bites man”</em> and <em>“man bites dog”</em> as the same collection of three word
+                    vectors—even though they mean very different things.</p>
+                <p>Positional encoding gives every token a clue about where it appears in the sequence. Some methods
+                    attach a position vector to each token, some add a distance-based adjustment when two tokens attend
+                    to one another, and some let the model infer order from another part of the architecture.</p>
+                <p class="plain-note">In more technical language: standard self-attention is <em>permutation
+                    equivariant</em>. If the inputs are reordered, its outputs are reordered in the same way; it
+                    does not independently recover the original order.</p>
+                <div class="position-diagram">
+                    <div><b>x₀</b><b>x₁</b><b>x₂</b><small>content alone</small></div>
+                    <i>+</i>
+                    <div><b class="pos">p₀</b><b class="pos">p₁</b><b class="pos">p₂</b><small>position signal</small>
+                    </div>
+                    <i>→</i>
+                    <div><b class="out">attention</b><small>ordered sequence</small></div>
+                </div>
+                <h2 id="absolute">Absolute positions</h2>
+                <p>The simplest approach adds one position vector p<sub>t</sub> to each token embedding x<sub>t</sub>.
+                    The vector may be learned as a table, or deterministic as in the original Transformer’s sinusoidal
+                    features.</p>
+                <p class="math-label">ABSOLUTE SINUSOIDAL FEATURES</p>
+                <div class="equation compact-equation">z<sub>t</sub> = x<sub>t</sub> + p<sub>t</sub><br>p<sub>t,2i</sub>
+                    = sin(t / 10000<sup>2i/D</sup>) &nbsp; ; &nbsp; p<sub>t,2i+1</sub> = cos(t / 10000<sup>2i/D</sup>)
+                </div>
+                <p>Learned tables are flexible inside their training range but cannot directly represent unseen
+                    positions. Sinusoids extend indefinitely, although a model trained on short sequences can still fail
+                    at much longer ones.</p>
+                <pre><code>import torch
+from torch import nn
+
+class LearnedAbsolutePositions(nn.Module):
+    def __init__(self, max_len, d_model):
+        super().__init__()
+        self.table = nn.Embedding(max_len, d_model)
+
+    def forward(self, x):                 # x: [B, T, D]
+        positions = torch.arange(x.size(1), device=x.device)
+        return x + self.table(positions)[None, :, :]</code></pre>
+                <h2 id="relative">Relative position methods</h2>
+                <p>Often the distance between two tokens matters more than their absolute addresses. Relative methods
+                    put the offset Δ = i−j directly into the score between query i and key j. T5 uses a learned,
+                    bucketed bias; ALiBi applies a head-specific linear penalty. Neither needs a position vector added
+                    to the residual stream.</p>
+                <div class="position-diagram relative">
+                    <div><b>q<sub>i</sub></b><small>query i</small></div>
+                    <i>·</i>
+                    <div><b>k<sub>j</sub></b><small>key j</small></div>
+                    <i>+</i>
+                    <div><b class="pos">b(i−j)</b><small>relative bias</small></div>
+                    <i>→</i>
+                    <div><b class="out">score</b></div>
+                </div>
+                <p class="math-label">RELATIVE ATTENTION BIAS</p>
+                <div class="equation compact-equation">score<sub>ij</sub> = <span class="fraction"><span
+                        class="numerator">q<sub>i</sub>k<sub>j</sub><sup>T</sup></span><span
+                        class="denominator">√d</span></span> + b(i−j)<br>ALiBi: b<sub>h</sub>(i−j) = −m<sub>h</sub>(i−j),
+                    for j ≤ i
+                </div>
+                <h2 id="rope">Rotary Position Embeddings <span>(RoPE)</span></h2>
+                <p>RoPE is the dominant approach in modern decoder models. Instead of adding a vector to x, it rotates
+                    paired coordinates of Q and K by a position-dependent angle. A two-dimensional pair [a,b] becomes a
+                    point on a plane; later positions are rotated farther around that plane.</p>
+                <div class="rotation-diagram">
+                    <div class="axis x-axis"></div>
+                    <div class="axis y-axis"></div>
+                    <div class="ray ray-a"></div>
+                    <div class="ray ray-b"></div>
+                    <span class="origin">0</span><span class="label-a">q</span><span class="label-b">R(t)q</span><span
+                        class="arc">θ<sub>t</sub></span></div>
+                <p class="math-label">ONE ROTARY PAIR</p>
+                <div class="equation compact-equation">R(θ<sub>t</sub>) = <span
+                        class="matrix"><span>cos θ<sub>t</sub></span><span>−sin θ<sub>t</sub></span><span>sin θ<sub>t</sub></span><span>cos θ<sub>t</sub></span></span><br>q′<sub>t</sub>=R(θ<sub>t</sub>)q<sub>t</sub>
+                    ; k′<sub>t</sub>=R(θ<sub>t</sub>)k<sub>t</sub></div>
+                <p>The key identity is what makes RoPE special: the dot product of a query at i and a key at j depends
+                    on their relative offset i−j, not their individual positions. Different coordinate pairs use
+                    different frequencies, so the model receives multiple distance scales.</p>
+                <p class="math-label">THE RELATIVE-POSITION PROPERTY</p>
+                <div class="equation compact-equation">(R(θ<sub>i</sub>)q)<sup>T</sup>R(θ<sub>j</sub>)k = q<sup>T</sup>R(θ<sub>j</sub>−θ<sub>i</sub>)k
+                </div>
+                <p class="code-label">PYTORCH REFERENCE · APPLYING ROPE</p>
+                <pre><code>import torch
+
+def apply_rope(q_or_k, base=10_000):
+    # q_or_k: [B, H, T, d], with even d
+    B, H, T, d = q_or_k.shape
+    position = torch.arange(T, device=q_or_k.device, dtype=q_or_k.dtype)
+    frequency = 1 / base ** (torch.arange(0, d, 2, device=q_or_k.device, dtype=q_or_k.dtype) / d)
+    angle = torch.outer(position, frequency)             # [T, d/2]
+    cos, sin = angle.cos()[None, None], angle.sin()[None, None]
+    even, odd = q_or_k[..., 0::2], q_or_k[..., 1::2]
+    return torch.stack((even*cos - odd*sin, even*sin + odd*cos), -1).flatten(-2)
+
+# Apply after Q/K projection; do not rotate V.</code></pre>
+                <h2 id="long">RoPE beyond its training length</h2>
+                <p>At long context, RoPE angles move into patterns the model did not see during training. The family of
+                    fixes changes the mapping from a token position t to a rotation angle.</p>
+                <div class="compare-wrap">
+                    <table>
+                        <thead>
+                        <tr>
+                            <th>Method</th>
+                            <th>Core idea</th>
+                            <th>Trade-off</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        <tr>
+                            <td><strong>Position interpolation</strong></td>
+                            <td>Use t/s for extension factor s.</td>
+                            <td>Simple; usually needs fine-tuning.</td>
+                        </tr>
+                        <tr>
+                            <td><strong>NTK-aware scaling</strong></td>
+                            <td>Adjust frequency base as context grows.</td>
+                            <td>Different handling of fine detail.</td>
+                        </tr>
+                        <tr>
+                            <td><strong>YaRN</strong></td>
+                            <td>Blend scaling regimes and tune attention temperature.</td>
+                            <td>More knobs; practical recipe.</td>
+                        </tr>
+                        <tr>
+                            <td><strong>LongRoPE</strong></td>
+                            <td>Search non-uniform scaling per dimension.</td>
+                            <td>Model-specific optimisation.</td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p>These are not magic switches. A context extension changes the model’s positional distribution; robust
+                    results normally require continued training or targeted fine-tuning at the new length.</p>
+                <h2 id="nope">No positional encoding <span>(NoPE)</span></h2>
+                <p><strong>NoPE is not “the model has no order.”</strong> It means no explicit positional embeddings,
+                    relative bias, or RoPE are injected into the full-attention path. In a causal decoder, the
+                    triangular mask still exposes a token’s place: the first token can attend to one position, the next
+                    to two, and so on. The model can learn to use this asymmetric computation graph as an implicit
+                    clock.</p>
+                <div class="nope-diagram">
+                    <div class="token">t₀<span>can see 1</span></div>
+                    <div class="token">t₁<span>can see 2</span></div>
+                    <div class="token">t₂<span>can see 3</span></div>
+                    <div class="token">t₃<span>can see 4</span></div>
+                    <p>causal visibility grows with position → implicit order signal</p></div>
+                <p class="math-label">CAUSAL NOPE ATTENTION</p>
+                <div class="equation compact-equation">score<sub>ij</sub> = <span class="fraction"><span
+                        class="numerator">q<sub>i</sub>k<sub>j</sub><sup>T</sup></span><span
+                        class="denominator">√d</span></span> &nbsp; where j ≤ i<br>score<sub>ij</sub> = −∞ &nbsp; where
+                    j &gt; i
+                </div>
+                <p>That signal is weak and indirect in ordinary full attention, which is why NoPE has historically been
+                    risky for tasks needing exact absolute position or generalisation to novel lengths. But it becomes
+                    much more plausible in architectures with another ordered state mechanism. Kimi K3’s report
+                    describes NoPE in its full-attention layers while delegating positional information and recency bias
+                    to its recurrent gating/decay mechanism (Kimi Delta Attention). This is evidence for NoPE <em>within
+                        a hybrid ordered architecture</em>, not proof that causal masking alone replaces position
+                    everywhere.</p>
+                <p class="code-label">PYTORCH REFERENCE · NOPE CAUSAL ATTENTION</p>
+                <pre><code>import math
+import torch
+from torch import nn
+
+class NoPECausalAttention(nn.Module):
+    def __init__(self, d_model, n_heads):
+        super().__init__(); assert d_model % n_heads == 0
+        self.h, self.d = n_heads, d_model // n_heads
+        self.qkv = nn.Linear(d_model, 3*d_model, bias=False)
+        self.out = nn.Linear(d_model, d_model, bias=False)
+    def forward(self, x):
+        B, T, D = x.shape
+        q, k, v = self.qkv(x).chunk(3, dim=-1)            # no position operation
+        def heads(z): return z.view(B,T,self.h,self.d).transpose(1,2)
+        q, k, v = map(heads, (q,k,v))
+        scores = q @ k.transpose(-2,-1) / math.sqrt(self.d)
+        future = torch.ones(T,T,device=x.device,dtype=torch.bool).triu(1)
+        y = scores.masked_fill(future, float("-inf")).softmax(-1) @ v
+        return self.out(y.transpose(1,2).contiguous().view(B,T,D))</code></pre>
+                <div class="callout"><strong>A useful diagnostic.</strong> If you remove explicit position and a model
+                    still performs well, ask where the order signal moved. It may be the causal mask, convolution,
+                    recurrence, state decay, chunk boundaries, data formatting, or a combination.
+                </div>
+                <h2 id="choose">Choosing a method</h2>
+                <div class="compare-wrap">
+                    <table>
+                        <thead>
+                        <tr>
+                            <th>Need</th>
+                            <th>Strong default</th>
+                            <th>Why</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        <tr>
+                            <td>Standard decoder LLM</td>
+                            <td><strong>RoPE</strong></td>
+                            <td>Expressive, cache-friendly, widely supported.</td>
+                        </tr>
+                        <tr>
+                            <td>Beyond training length</td>
+                            <td><strong>RoPE + trained scaling</strong></td>
+                            <td>Preserves the model’s positional interface.</td>
+                        </tr>
+                        <tr>
+                            <td>Relative-distance bias</td>
+                            <td><strong>ALiBi</strong></td>
+                            <td>No embedding table; clean extrapolation.</td>
+                        </tr>
+                        <tr>
+                            <td>Hybrid recurrent / linear attention</td>
+                            <td><strong>NoPE, evaluated carefully</strong></td>
+                            <td>May avoid a redundant explicit signal.</td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <hr>
+                <p class="sources"><strong>Further reading</strong><br><a href="https://arxiv.org/abs/1706.03762">Attention
+                    Is All You Need</a> · <a href="https://arxiv.org/abs/2104.09864">RoFormer / RoPE</a> · <a
+                        href="https://arxiv.org/abs/2108.12409">ALiBi</a> · <a href="https://arxiv.org/abs/2306.15595">Position
+                    Interpolation</a> · <a href="https://arxiv.org/abs/2309.00071">YaRN</a> · <a
+                        href="https://arxiv.org/abs/2402.13753">LongRoPE</a> · <a
+                        href="https://arxiv.org/abs/2607.24653">Kimi K3 report</a></p>
+            </div>
+        </div>
+    </article>
+</main>
+<footer><a class="wordmark" href="../"><span class="mark">∿</span> stucksam</a>
+    <p>Notes on learning machines, in public.</p><span>© 2026</span></footer>
+</body>
+</html>
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta name="description"
+          content="A technical guide to positional encoding: absolute embeddings, relative bias, RoPE, long-context scaling, and NoPE.">
+    <title>Positional encoding — stucksam</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap"
+          rel="stylesheet">
+    <link rel="stylesheet" href="../styles.css">
+    <link rel="stylesheet" href="../attention/article.css">
+    <link rel="stylesheet" href="position.css">
+</head>
+<body>
+<header class="site-header article-header"><a class="wordmark" href="../"><span class="mark">∿</span> stucksam</a><a
+        class="back-link" href="../foundations/">← Core concepts</a></header>
+<main class="article">
+    <article>
+        <header class="article-hero"><p class="eyebrow"><span></span> Foundations · explainer</p>
+            <p class="article-kicker">How a sequence model learns that order exists.</p>
+            <h1>Positional<br><em>encoding</em></h1>
+            <p class="article-dek">Absolute positions, relative biases, rotary embeddings, long-context extensions, and
+                the surprising return of no positional encoding.</p>
+            <div class="article-meta"><span>18 min read</span><span>Updated Jul 2026</span></div>
+        </header>
+        <div class="article-layout">
+            <aside class="toc"><p>ON THIS PAGE</p><a href="#need">Why position?</a><a href="#absolute">Absolute
+                positions</a><a href="#relative">Relative methods</a><a href="#rope">RoPE</a><a href="#long">Long
+                context</a><a href="#nope">NoPE</a><a href="#choose">Decision guide</a></aside>
+            <div class="prose">
+                <p class="lead">Attention compares content. Unless we add—or induce—an ordering signal, “dog bites man”
+                    and “man bites dog” are the same bag of token vectors.</p>
+                <div class="shape-key"><strong>Notation</strong><span>t position</span><span>D model width</span><span>H heads</span><span>d head width</span><span>Δ relative offset</span>
+                </div>
+                <h2 id="need">Why position exists at all</h2>
+                <p>Attention can tell which words are present, but not their order. Without extra information, it would
+                    treat <em>“dog bites man”</em> and <em>“man bites dog”</em> as the same collection of three word
+                    vectors—even though they mean very different things.</p>
+                <p>Positional encoding gives every token a clue about where it appears in the sequence. Some methods
+                    attach a position vector to each token, some add a distance-based adjustment when two tokens attend
+                    to one another, and some let the model infer order from another part of the architecture.</p>
+                <p class="plain-note">In more technical language: standard self-attention is <em>permutation
+                    equivariant</em>. If the inputs are reordered, its outputs are reordered in the same way; it
+                    does not independently recover the original order.</p>
                 <div class="position-diagram">
                     <div><b>x₀</b><b>x₁</b><b>x₂</b><small>content alone</small></div>
                     <i>+</i>
