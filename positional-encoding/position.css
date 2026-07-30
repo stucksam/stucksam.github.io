@@ -11,6 +11,13 @@
     text-align: center;
 }
 
+.plain-note {
+    border-left: 3px solid var(--blue);
+    padding: 4px 0 4px 16px;
+    color: #5a6661;
+    font-size: .9rem;
+}
+
 .position-diagram > div {
     display: flex;
     gap: 5px;

@@ -1,3 +1,10 @@
+---
+title: Positional encoding: RoPE, NoPE, and beyond
+date: 2026-07-30
+topic: Foundations
+note_type: EXPLAINER
+note: true
+---
 <!doctype html>
 <html lang="en">
 <head>
@@ -36,10 +43,15 @@
                 <div class="shape-key"><strong>Notation</strong><span>t position</span><span>D model width</span><span>H heads</span><span>d head width</span><span>Δ relative offset</span>
                 </div>
                 <h2 id="need">Why position exists at all</h2>
-                <p>Self-attention is permutation equivariant: permute every input row and the outputs permute in exactly
-                    the same way. That is useful for sets, but language is ordered. Positional methods break this
-                    symmetry by changing the token representation, changing the attention score, or relying on an
-                    architectural signal that already carries order.</p>
+                <p>Attention can tell which words are present, but not their order. Without extra information, it would
+                    treat <em>“dog bites man”</em> and <em>“man bites dog”</em> as the same collection of three word
+                    vectors—even though they mean very different things.</p>
+                <p>Positional encoding gives every token a clue about where it appears in the sequence. Some methods
+                    attach a position vector to each token, some add a distance-based adjustment when two tokens attend
+                    to one another, and some let the model infer order from another part of the architecture.</p>
+                <p class="plain-note">In more technical language: standard self-attention is <em>permutation
+                        equivariant</em>. If the inputs are reordered, its outputs are reordered in the same way; it
+                    does not independently recover the original order.</p>
                 <div class="position-diagram">
                     <div><b>x₀</b><b>x₁</b><b>x₂</b><small>content alone</small></div>
                     <i>+</i>
