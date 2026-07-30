@@ -1,109 +1,126 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Technical notes on language, speech, and vision models." />
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <meta name="description" content="Technical notes on language, speech, and vision models."/>
     <title>stucksam — model notes</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="styles.css" />
-  </head>
-  <body>
-    <div class="grid-glow" aria-hidden="true"></div>
-    <header class="site-header">
-      <a class="wordmark" href="/" aria-label="stucksam home"><span class="mark">∿</span> stucksam</a>
-      <nav aria-label="Primary navigation">
+    <link rel="preconnect" href="https://fonts.googleapis.com"/>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap"
+          rel="stylesheet"/>
+    <link rel="stylesheet" href="styles.css"/>
+</head>
+<body>
+<div class="grid-glow" aria-hidden="true"></div>
+<header class="site-header">
+    <a class="wordmark" href="/" aria-label="stucksam home"><span class="mark">∿</span> stucksam</a>
+    <nav aria-label="Primary navigation">
         <a href="#topics">Topics</a>
         <a href="#recent">Notes</a>
         <a href="#reading">Reading</a>
-      </nav>
-      <a class="github-link" href="https://github.com/stucksam" aria-label="GitHub profile">GH <span>↗</span></a>
-    </header>
+    </nav>
+    <a class="github-link" href="https://github.com/stucksam" aria-label="GitHub profile">GH <span>↗</span></a>
+</header>
 
-    <main>
-      <section class="hero" aria-labelledby="hero-title">
+<main>
+    <section class="hero" aria-labelledby="hero-title">
         <p class="eyebrow"><span></span> A personal technical notebook</p>
-        <h1 id="hero-title">Making sense of<br /><em>intelligent systems.</em></h1>
-        <p class="intro">Working notes on the models that listen, speak, read, and reason—plus the mechanisms underneath them.</p>
+        <h1 id="hero-title">Making sense of<br/><em>intelligent systems.</em></h1>
+        <p class="intro">Working notes on the models that listen, speak, read, and reason—plus the mechanisms underneath
+            them.</p>
         <div class="hero-actions">
-          <a class="button primary" href="#topics">Explore the notebook <span>↓</span></a>
-          <a class="button quiet" href="#recent">Latest notes <span>→</span></a>
+            <a class="button primary" href="#topics">Explore the notebook <span>↓</span></a>
+            <a class="button quiet" href="#recent">Latest notes <span>→</span></a>
         </div>
         <div class="hero-index" aria-label="Topics covered">
-          <span>01 / LLMs</span><span>02 / Speech</span><span>03 / Vision</span><span>04 / Foundations</span>
+            <span>01 / LLMs</span><span>02 / Speech</span><span>03 / Vision</span><span>04 / Foundations</span>
         </div>
-      </section>
+    </section>
 
-      <section class="topic-section" id="topics" aria-labelledby="topics-title">
+    <section class="topic-section" id="topics" aria-labelledby="topics-title">
         <div class="section-heading">
-          <p class="eyebrow"><span></span> Browse by domain</p>
-          <h2 id="topics-title">Start with a question.</h2>
-          <p>Each path collects explainers, paper notes, and implementation details in one place.</p>
+            <p class="eyebrow"><span></span> Browse by domain</p>
+            <h2 id="topics-title">Start with a question.</h2>
+            <p>Each path collects explainers, paper notes, and implementation details in one place.</p>
         </div>
         <div class="topic-grid">
-          <a class="topic-card coral" href="llms/">
-            <span class="card-number">01</span><span class="card-arrow">↗</span>
-            <h3>Language<br />models</h3>
-            <p>Architectures, training, inference, alignment, and the changing shape of transformers.</p>
-            <div class="tags"><span>Transformers</span><span>MoE</span><span>Agents</span></div>
-          </a>
-          <a class="topic-card blue" href="speech/">
-            <span class="card-number">02</span><span class="card-arrow">↗</span>
-            <h3>Speech &amp;<br />audio</h3>
-            <p>Automatic speech recognition, synthesis, audio codecs, and generative voice.</p>
-            <div class="tags"><span>ASR</span><span>TTS</span><span>Codecs</span></div>
-          </a>
-          <a class="topic-card yellow" href="vision/">
-            <span class="card-number">03</span><span class="card-arrow">↗</span>
-            <h3>Vision &amp;<br />multimodal</h3>
-            <p>How models turn pixels into understanding—and combine the senses.</p>
-            <div class="tags"><span>VLMs</span><span>Diffusion</span><span>Vision encoders</span></div>
-          </a>
-          <a class="topic-card dark" href="foundations/">
-            <span class="card-number">04</span><span class="card-arrow">↗</span>
-            <h3>Core<br />concepts</h3>
-            <p>The durable ideas: attention, tokenization, positional encoding, optimization, and more.</p>
-            <div class="tags"><span>Attention</span><span>RoPE</span><span>Scaling laws</span></div>
-          </a>
+            <a class="topic-card coral" href="llms/">
+                <span class="card-number">01</span><span class="card-arrow">↗</span>
+                <h3>Language<br/>models</h3>
+                <p>Architectures, training, inference, alignment, and the changing shape of transformers.</p>
+                <div class="tags"><span>Transformers</span><span>MoE</span><span>Agents</span></div>
+            </a>
+            <a class="topic-card blue" href="speech/">
+                <span class="card-number">02</span><span class="card-arrow">↗</span>
+                <h3>Speech &amp;<br/>audio</h3>
+                <p>Automatic speech recognition, synthesis, audio codecs, and generative voice.</p>
+                <div class="tags"><span>ASR</span><span>TTS</span><span>Codecs</span></div>
+            </a>
+            <a class="topic-card yellow" href="vision/">
+                <span class="card-number">03</span><span class="card-arrow">↗</span>
+                <h3>Vision &amp;<br/>multimodal</h3>
+                <p>How models turn pixels into understanding—and combine the senses.</p>
+                <div class="tags"><span>VLMs</span><span>Diffusion</span><span>Vision encoders</span></div>
+            </a>
+            <a class="topic-card dark" href="foundations/">
+                <span class="card-number">04</span><span class="card-arrow">↗</span>
+                <h3>Core<br/>concepts</h3>
+                <p>The durable ideas: attention, tokenization, positional encoding, optimization, and more.</p>
+                <div class="tags"><span>Attention</span><span>RoPE</span><span>Scaling laws</span></div>
+            </a>
         </div>
-      </section>
+    </section>
 
-      <section class="recent-section" id="recent" aria-labelledby="recent-title">
+    <section class="recent-section" id="recent" aria-labelledby="recent-title">
         <div class="section-heading compact">
-          <p class="eyebrow"><span></span> Fresh from the desk</p>
-          <div class="heading-row"><h2 id="recent-title">Recent notes</h2><a href="#all-notes">View all notes <span>→</span></a></div>
+            <p class="eyebrow"><span></span> Fresh from the desk</p>
+            <div class="heading-row"><h2 id="recent-title">Recent notes</h2><a href="#all-notes">View all notes
+                <span>→</span></a></div>
         </div>
         <div class="note-list" id="all-notes">
-          <a class="note" href="attention/">
-            <span class="note-type">EXPLAINER</span><span class="note-title">Attention mechanisms: MHA, MQA, and MLA</span><span class="note-topic">Foundations</span><time datetime="2026-07">Jul ’26</time><span class="note-arrow">↗</span>
-          </a>
-          <a class="note" href="attention/">
-            <span class="note-type">PAPER</span><span class="note-title">Attention Is All You Need: a practical reading</span><span class="note-topic">Foundations</span><time datetime="2026-07">Jul ’26</time><span class="note-arrow">↗</span>
-          </a>
-          <a class="note" href="#">
-            <span class="note-type">EXPLAINER</span><span class="note-title">From waveform to words: modern ASR</span><span class="note-topic">Speech</span><time datetime="2026-06">Jun ’26</time><span class="note-arrow">↗</span>
-          </a>
-          <a class="note" href="attention/">
-            <span class="note-type">CODE</span><span class="note-title">Attention, built from first principles</span><span class="note-topic">Foundations</span><time datetime="2026-07">Jul ’26</time><span class="note-arrow">↗</span>
-          </a>
+            <a class="note" href="attention/">
+                <span class="note-type">EXPLAINER</span><span
+                    class="note-title">Attention mechanisms: MHA, MQA, and MLA</span><span class="note-topic">Foundations</span>
+                <time datetime="2026-07">Jul ’26</time>
+                <span class="note-arrow">↗</span>
+            </a>
+            <a class="note" href="attention/">
+                <span class="note-type">PAPER</span><span class="note-title">Attention Is All You Need: a practical reading</span><span
+                    class="note-topic">Foundations</span>
+                <time datetime="2026-07">Jul ’26</time>
+                <span class="note-arrow">↗</span>
+            </a>
+            <a class="note" href="#">
+                <span class="note-type">EXPLAINER</span><span
+                    class="note-title">From waveform to words: modern ASR</span><span class="note-topic">Speech</span>
+                <time datetime="2026-06">Jun ’26</time>
+                <span class="note-arrow">↗</span>
+            </a>
+            <a class="note" href="attention/">
+                <span class="note-type">CODE</span><span
+                    class="note-title">Attention, built from first principles</span><span
+                    class="note-topic">Foundations</span>
+                <time datetime="2026-07">Jul ’26</time>
+                <span class="note-arrow">↗</span>
+            </a>
         </div>
-      </section>
+    </section>
 
-      <section class="reading-section" id="reading">
+    <section class="reading-section" id="reading">
         <div>
-          <p class="eyebrow"><span></span> Field notes, not a feed</p>
-          <h2>For the curious,<br />and the <em>committed.</em></h2>
+            <p class="eyebrow"><span></span> Field notes, not a feed</p>
+            <h2>For the curious,<br/>and the <em>committed.</em></h2>
         </div>
-        <p class="reading-copy">This is a growing, opinionated index of things worth understanding. Explanations aim to be rigorous without hiding behind jargon, and code accompanies ideas when it helps.</p>
-      </section>
-    </main>
+        <p class="reading-copy">This is a growing, opinionated index of things worth understanding. Explanations aim to
+            be rigorous without hiding behind jargon, and code accompanies ideas when it helps.</p>
+    </section>
+</main>
 
-    <footer>
-      <a class="wordmark" href="/"><span class="mark">∿</span> stucksam</a>
-      <p>Notes on learning machines, in public.</p>
-      <span>© 2026</span>
-    </footer>
-  </body>
+<footer>
+    <a class="wordmark" href="/"><span class="mark">∿</span> stucksam</a>
+    <p>Notes on learning machines, in public.</p>
+    <span>© 2026</span>
+</footer>
+</body>
 </html>
