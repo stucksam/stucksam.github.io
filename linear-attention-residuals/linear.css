@@ -1,0 +1,141 @@
+.dual-diagram, .state-diagram, .hybrid-diagram, .depth-diagram, .block-diagram {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    margin: 28px 0 35px;
+    padding: 22px;
+    border: 1px solid var(--line);
+    background: #eeece5;
+    text-align: center
+}
+
+.dual-diagram {
+    gap: 30px
+}
+
+.dual-diagram section {
+    width: 45%
+}
+
+.dual-diagram span {
+    display: block;
+    margin-bottom: 9px;
+    color: var(--muted);
+    font: .6rem "DM Mono", monospace;
+    letter-spacing: .07em
+}
+
+.dual-diagram section div, .depth-diagram > div:first-child, .block-diagram > div:first-child {
+    display: flex;
+    gap: 4px;
+    justify-content: center
+}
+
+.dual-diagram b, .state-diagram b, .hybrid-diagram b, .depth-diagram b, .block-diagram b {
+    display: block;
+    padding: 8px 7px;
+    background: var(--blue);
+    font: .67rem "DM Mono", monospace
+}
+
+.dual-diagram p {
+    margin: 11px 0 0 !important;
+    font-size: .73rem;
+    line-height: 1.4
+}
+
+.state-diagram > div, .depth-diagram > div, .block-diagram > div {
+    position: relative
+}
+
+.state-diagram small, .depth-diagram small, .block-diagram small {
+    position: absolute;
+    top: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    white-space: nowrap;
+    color: var(--muted);
+    font: .55rem "DM Mono", monospace
+}
+
+.state-diagram {
+    padding-bottom: 37px
+}
+
+.state-diagram .decay {
+    background: var(--yellow)
+}
+
+.state-diagram .erase {
+    background: #d9a6a0
+}
+
+.state-diagram .write, .hybrid-diagram .mla, .depth-diagram .select, .block-diagram .select {
+    background: var(--coral)
+}
+
+.state-diagram i, .hybrid-diagram i, .depth-diagram i, .block-diagram i {
+    font-style: normal;
+    font-size: 1.25rem;
+    color: var(--coral)
+}
+
+.hybrid-diagram {
+    position: relative;
+    padding-bottom: 39px
+}
+
+.hybrid-diagram small {
+    position: absolute;
+    bottom: 15px;
+    color: var(--muted);
+    font: .6rem "DM Mono", monospace
+}
+
+.depth-diagram, .block-diagram {
+    padding-bottom: 38px
+}
+
+.depth-diagram .query, .block-diagram .partial {
+    background: var(--yellow)
+}
+
+@media (max-width: 530px) {
+    .dual-diagram {
+        gap: 10px;
+        padding: 16px 6px
+    }
+
+    .dual-diagram b {
+        font-size: .51rem;
+        padding: 6px 3px
+    }
+
+    .dual-diagram p {
+        font-size: .62rem
+    }
+
+    .state-diagram, .depth-diagram, .block-diagram {
+        gap: 5px;
+        padding-left: 5px;
+        padding-right: 5px
+    }
+
+    .state-diagram b, .depth-diagram b, .block-diagram b {
+        font-size: .5rem;
+        padding: 7px 4px
+    }
+
+    .state-diagram small, .depth-diagram small, .block-diagram small {
+        font-size: .43rem
+    }
+
+    .hybrid-diagram {
+        gap: 4px
+    }
+
+    .hybrid-diagram b {
+        font-size: .55rem
+    }
+}

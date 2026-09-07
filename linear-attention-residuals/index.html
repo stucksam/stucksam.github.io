@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <title>Attention across sequence and depth — stucksam</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap"
+          rel="stylesheet">
+    <link rel="stylesheet" href="../styles.css">
+    <link rel="stylesheet" href="../attention/article.css">
+    <link rel="stylesheet" href="linear.css">
+</head>
+<body>
+<header class="site-header article-header"><a class="wordmark" href="../"><span class="mark">∿</span> stucksam</a><a
+        class="back-link" href="../foundations/">← Core concepts</a></header>
+<main class="article">
+    <article>
+        <header class="article-hero"><p class="eyebrow"><span></span> Foundations · paper note</p>
+            <p class="article-kicker">Two Kimi papers, one useful lens.</p>
+            <h1>Attention across<br><em>sequence &amp; depth</em></h1>
+            <p class="article-dek">Kimi Linear makes attention cheaper over tokens. Attention Residuals makes residual
+                connections selective over layers.</p>
+            <div class="article-meta"><span>16 min read</span><span>Based on two technical reports</span></div>
+        </header>
+        <div class="article-layout">
+            <aside class="toc"><p>ON THIS PAGE</p><a href="#lens">The shared idea</a><a href="#kda">Kimi Delta
+                Attention</a><a href="#hybrid">Kimi Linear</a><a href="#residual">Attention Residuals</a><a
+                    href="#block">Block AttnRes</a><a href="#compare">Comparison</a></aside>
+            <div class="prose"><p class="lead">Both papers ask a similar question: instead of carrying forward one
+                undifferentiated summary, can a model decide what to keep and what to retrieve?</p>
+                <div class="dual-diagram">
+                    <section><span>SEQUENCE AXIS</span>
+                        <div><b>token 1</b><b>token 2</b><b>token 3</b><b>token t</b></div>
+                        <p>Kimi Linear stores a compact state while moving through tokens.</p></section>
+                    <section><span>DEPTH AXIS</span>
+                        <div><b>layer 1</b><b>layer 2</b><b>layer 3</b><b>layer l</b></div>
+                        <p>Attention Residuals selects from earlier layer outputs.</p></section>
+                </div>
+                <h2 id="lens">The shared idea</h2>
+                <p>Normal attention looks across <strong>sequence position</strong>: at token t, which earlier tokens
+                    should matter? A normal residual connection looks across <strong>network depth</strong> in the
+                    simplest possible way: it always adds the immediately previous state to the new layer output.</p>
+                <p>Kimi Linear improves the first problem. Attention Residuals improves the second. The papers call this
+                    a <em>sequence-depth duality</em>: a model has two directions in which it can move
+                    information—across tokens and across layers.</p>
+                <h2 id="kda">Kimi Delta Attention <span>(KDA)</span></h2>
+                <p>Linear attention replaces the growing KV cache with a fixed-size matrix state S. On each token, it
+                    writes a key/value association to this state, then reads with the query. This makes generation
+                    cheap, but the same state must represent an ever longer past.</p>
+                <p class="math-label">BASIC LINEAR ATTENTION</p>
+                <div class="equation compact-equation">S<sub>t</sub> = S<sub>t−1</sub> + k<sub>t</sub>v<sub>t</sub><sup>T</sup>
+                    &nbsp; ; &nbsp; o<sub>t</sub> = S<sub>t</sub><sup>T</sup>q<sub>t</sub></div>
+                <p>The problem is interference: every new association is added forever. DeltaNet changes the update into
+                    a correction. If the current key already retrieves something from memory, it erases that prediction
+                    before writing the new value.</p>
+                <p class="math-label">KIMI DELTA ATTENTION</p>
+                <div class="equation compact-equation">S<sub>t</sub> = (I − β<sub>t</sub>k<sub>t</sub>k<sub>t</sub><sup>T</sup>)Diag(α<sub>t</sub>)S<sub>t−1</sub>
+                    + β<sub>t</sub>k<sub>t</sub>v<sub>t</sub><sup>T</sup><br>o<sub>t</sub> =
+                    S<sub>t</sub><sup>T</sup>q<sub>t</sub></div>
+                <div class="state-diagram">
+                    <div><b>old state</b><small>S<sub>t−1</sub></small></div>
+                    <i>→</i>
+                    <div><b class="decay">channel decay</b><small>α<sub>t</sub></small></div>
+                    <i>→</i>
+                    <div><b class="erase">correct
+                        key</b><small>β<sub>t</sub>k<sub>t</sub>k<sub>t</sub><sup>T</sup></small></div>
+                    <i>+</i>
+                    <div><b class="write">write KV</b><small>β<sub>t</sub>k<sub>t</sub>v<sub>t</sub><sup>T</sup></small>
+                    </div>
+                </div>
+                <p>KDA adds a learned forget gate before the delta correction. The important detail is that
+                    α<sub>t</sub> is <strong>one gate per key channel</strong>, not one scalar per head. Individual
+                    memory dimensions can decay at different rates, giving it a richer position and recency signal.</p>
+                <p class="code-label">PYTORCH REFERENCE · CONCEPTUAL KDA STEP</p>
+                <pre><code>def kda_step(state, q, k, v, alpha, beta):
+    # state: [B, d_key, d_value]; alpha: [B, d_key]
+    decayed = alpha.unsqueeze(-1) * state
+    retrieved = torch.einsum("bkd,bk->bd", decayed, k)
+    error = v - beta.unsqueeze(-1) * retrieved
+    next_state = decayed + torch.einsum("bk,bd->bkd", beta * k, error)
+    output = torch.einsum("bkd,bk->bd", next_state, q)
+    return output, next_state</code></pre>
+                <h2 id="hybrid">Kimi Linear: why it stays hybrid</h2>
+                <p>A fixed-size state cannot always perform exact retrieval from a huge context. Kimi Linear therefore
+                    does not replace full attention everywhere. It repeats <strong>three KDA layers, then one MLA
+                        layer</strong>. KDA handles most token mixing efficiently; periodic Multi-Head Latent Attention
+                    provides a global retrieval path.</p>
+                <div class="hybrid-diagram"><b>KDA</b><b>KDA</b><b>KDA</b><b class="mla">MLA</b><i>↻</i><small>repeat 3
+                    : 1</small></div>
+                <p>The report applies <a href="../positional-encoding/">NoPE</a> to the MLA layers. This is not “no
+                    order at all”: KDA’s channel-wise decay becomes the position-aware operator and supplies recency
+                    bias, while the full-attention layers focus on global retrieval. The paper reports its NoPE model
+                    outperformed its matched RoPE variant on the listed long-context evaluation.</p>
+                <p>KDA is also rearranged into chunks: recurrence passes state between chunks, while work inside a chunk
+                    becomes parallel matrix multiplication. Its constrained diagonal-plus-low-rank transition avoids
+                    expensive operations in more general fine-grained linear-attention forms.</p>
+                <h2 id="residual">Attention Residuals <span>(AttnRes)</span></h2>
+                <p>Standard PreNorm residuals use h<sub>l</sub> = h<sub>l−1</sub> + f<sub>l−1</sub>(h<sub>l−1</sub>).
+                    Every layer output is added with weight one, even after it has been carried through many later
+                    layers. The report argues that this grows hidden-state magnitudes and makes useful early features
+                    hard to select.</p>
+                <p>AttnRes changes the question from “add the previous state” to “which earlier layer outputs are useful
+                    right now?” It treats earlier layer outputs as keys and values, and gives each destination layer l a
+                    learned pseudo-query w<sub>l</sub>.</p>
+                <p class="math-label">FULL DEPTH-WISE ATTENTION</p>
+                <div class="equation compact-equation">h<sub>l</sub> = Σ<sub>i&lt;l</sub> α<sub>i→l</sub>v<sub>i</sub>
+                    &nbsp; ; &nbsp; α<sub>i→l</sub> = softmax<sub>i</sub>(w<sub>l</sub><sup>T</sup>RMSNorm(k<sub>i</sub>))<br>v<sub>0</sub>=h<sub>1</sub>,
+                    &nbsp; v<sub>i</sub>=f<sub>i</sub>(h<sub>i</sub>)
+                </div>
+                <div class="depth-diagram">
+                    <div><b>h₁</b><b>f₁</b><b>f₂</b><b>f₃</b></div>
+                    <i>↘</i>
+                    <div><b class="query">w<sub>l</sub></b><small>learned pseudo-query</small></div>
+                    <i>→</i>
+                    <div><b class="select">h<sub>l</sub></b><small>weighted layer mixture</small></div>
+                </div>
+                <p>The query is learned per layer; the actual attention weights are input-dependent because the source
+                    representations change by token. A deep layer can directly retrieve an earlier feature instead of
+                    requiring every useful signal to survive inside one cumulative residual stream.</p>
+                <h2 id="block">Block AttnRes makes it practical</h2>
+                <p>Full AttnRes needs each layer to read all earlier outputs, which is expensive at scale. Block AttnRes
+                    splits L layers into N blocks. It stores one representation per completed block; within the current
+                    block it also attends to the partial sum already computed.</p>
+                <div class="block-diagram">
+                    <div><b>block 0</b><b>block 1</b><b>block 2</b></div>
+                    <i>+</i>
+                    <div><b class="partial">current partial block</b></div>
+                    <i>→</i>
+                    <div><b class="select">layer output</b></div>
+                </div>
+                <p>Its two-phase schedule is the key systems idea. First, all pseudo-queries in one block attend to
+                    cached earlier blocks in one batched operation. Then layers inside that block run sequentially and
+                    merge the results with online softmax. The report measures less than 2% end-to-end inference-latency
+                    overhead on typical workloads.</p>
+                <h2 id="compare">What connects the papers</h2>
+                <div class="compare-wrap">
+                    <table>
+                        <thead>
+                        <tr>
+                            <th></th>
+                            <th>Kimi Linear</th>
+                            <th>Attention Residuals</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        <tr>
+                            <td><strong>Axis</strong></td>
+                            <td>Sequence / tokens</td>
+                            <td>Depth / layers</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Baseline problem</strong></td>
+                            <td>KV cache and quadratic retrieval</td>
+                            <td>Uniform residual accumulation</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Main operation</strong></td>
+                            <td>Gated, editable recurrent memory</td>
+                            <td>Softmax retrieval over prior layers</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Practical compromise</strong></td>
+                            <td>3 KDA layers + 1 MLA layer</td>
+                            <td>Block summaries + intra-block attention</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Core trade-off</strong></td>
+                            <td>Finite state vs exact global recall</td>
+                            <td>Cross-layer access vs memory traffic</td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p>They are complementary. Kimi Linear is about <em>how a layer mixes tokens</em>; Attention Residuals
+                    is about <em>what state a layer receives before it mixes tokens</em>. Together they suggest a useful
+                    principle: use cheap structured state for the common path, then keep selective attention where exact
+                    retrieval matters.</p>
+                <hr>
+                <p class="sources"><strong>Primary sources</strong><br><a
+                        href="../docs/papers/2510.26692v2_Kimi_Linear.pdf">Kimi Linear: An Expressive, Efficient
+                    Attention Architecture</a> · <a href="../docs/papers/2603.15031v1_Attention_residuals.pdf">Attention
+                    Residuals</a></p></div>
+        </div>
+    </article>
+</main>
+<footer><a class="wordmark" href="../"><span class="mark">∿</span> stucksam</a>
+    <p>Notes on learning machines, in public.</p><span>© 2026</span></footer>
+</body>
+</html>
