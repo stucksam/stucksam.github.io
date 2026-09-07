@@ -22,12 +22,14 @@
             <h1>Attention across<br><em>sequence &amp; depth</em></h1>
             <p class="article-dek">Kimi Linear makes attention cheaper over tokens. Attention Residuals makes residual
                 connections selective over layers.</p>
-            <div class="article-meta"><span>16 min read</span><span>Based on two technical reports</span></div>
+            <div class="article-meta"><span>22 min read</span><span>Based on two technical reports</span></div>
         </header>
         <div class="article-layout">
-            <aside class="toc"><p>ON THIS PAGE</p><a href="#lens">The shared idea</a><a href="#kda">Kimi Delta
+            <aside class="toc"><p>ON THIS PAGE</p><a href="#lens">The shared idea</a><a href="#lineage">The KDA
+                lineage</a><a href="#kda">Kimi Delta
                 Attention</a><a href="#hybrid">Kimi Linear</a><a href="#residual">Attention Residuals</a><a
-                    href="#block">Block AttnRes</a><a href="#compare">Comparison</a></aside>
+                    href="#residual-context">Residual alternatives</a><a href="#block">Block AttnRes</a><a
+                    href="#compare">Comparison</a></aside>
             <div class="prose"><p class="lead">Both papers ask a similar question: instead of carrying forward one
                 undifferentiated summary, can a model decide what to keep and what to retrieve?</p>
                 <div class="dual-diagram">
@@ -45,6 +47,35 @@
                 <p>Kimi Linear improves the first problem. Attention Residuals improves the second. The papers call this
                     a <em>sequence-depth duality</em>: a model has two directions in which it can move
                     information—across tokens and across layers.</p>
+                <h2 id="lineage">The KDA lineage: write, correct, forget</h2>
+                <p>KDA did not appear from nowhere. It is part of a sequence of increasingly capable <strong>fast-weight
+                    memories</strong>. In each version, a layer stores key/value associations in a small state matrix
+                    rather than keeping every prior key and value in a cache.</p>
+                <div class="lineage-diagram">
+                    <div><b>Linear attention</b><small>write</small></div>
+                    <i>→</i>
+                    <div><b class="delta">DeltaNet</b><small>correct</small></div>
+                    <i>→</i>
+                    <div><b class="gated">Gated DeltaNet</b><small>forget</small></div>
+                    <i>→</i>
+                    <div><b class="kda">KDA</b><small>forget per channel</small></div>
+                </div>
+                <p><strong>Vanilla linear attention</strong> only writes. It accumulates k<sub>t</sub>v<sub>t</sub><sup>T</sup>
+                    at every step, so old and new associations eventually interfere. <strong>DeltaNet</strong> treats
+                    the state as an online predictor: before writing v<sub>t</sub> for key k<sub>t</sub>, it measures
+                    the current prediction and writes only the error. This is the classical delta rule from online
+                    learning.</p>
+                <p><strong>Gated DeltaNet (GDN)</strong> then introduces a learned scalar α<sub>t</sub> per attention
+                    head. It shrinks the whole state before the correction, making memory duration data-dependent. This
+                    is a major improvement over permanent accumulation, but every channel in a head still shares one
+                    forgetting rate. KDA retains the delta update but replaces that scalar with a vector α<sub>t</sub>,
+                    so it can retain some features while rapidly clearing others.</p>
+                <p class="math-label">THREE SUCCESSIVE STATE UPDATES</p>
+                <div class="equation compact-equation">Linear: S<sub>t</sub> = S<sub>t−1</sub> +
+                    k<sub>t</sub>v<sub>t</sub><sup>T</sup><br>GDN: S<sub>t</sub> = α<sub>t</sub>(I − β<sub>t</sub>k<sub>t</sub>k<sub>t</sub><sup>T</sup>)S<sub>t−1</sub>
+                    + β<sub>t</sub>k<sub>t</sub>v<sub>t</sub><sup>T</sup><br>KDA: replace scalar α<sub>t</sub> with
+                    Diag(α<sub>t</sub>)
+                </div>
                 <h2 id="kda">Kimi Delta Attention <span>(KDA)</span></h2>
                 <p>Linear attention replaces the growing KV cache with a fixed-size matrix state S. On each token, it
                     writes a key/value association to this state, then reads with the query. This makes generation
@@ -73,6 +104,16 @@
                 <p>KDA adds a learned forget gate before the delta correction. The important detail is that
                     α<sub>t</sub> is <strong>one gate per key channel</strong>, not one scalar per head. Individual
                     memory dimensions can decay at different rates, giving it a richer position and recency signal.</p>
+                <p>There are two more learned controls. β<sub>t</sub>, constrained between zero and one, acts as the
+                    update rate: a small value barely revises the old association, while a large value strongly
+                    overwrites it. q, k, and v are not plain linear projections in Kimi Linear; the paper passes them
+                    through short convolutions and a Swish activation, then L2-normalizes q and k. The convolution
+                    provides local order cues, and normalization keeps the state transition numerically stable.</p>
+                <div class="callout"><strong>KDA is not softmax attention made cheaper.</strong> It has a different
+                    memory model. Softmax attention can revisit any individual cached token; KDA compresses history into
+                    a finite state. Its gating and delta rule make that state far more useful, but exact recall from an
+                    arbitrary million-token history is still the reason Kimi Linear keeps periodic MLA layers.
+                </div>
                 <p class="code-label">PYTORCH REFERENCE · CONCEPTUAL KDA STEP</p>
                 <pre><code>def kda_step(state, q, k, v, alpha, beta):
     # state: [B, d_key, d_value]; alpha: [B, d_key]
@@ -119,6 +160,50 @@
                 <p>The query is learned per layer; the actual attention weights are input-dependent because the source
                     representations change by token. A deep layer can directly retrieve an earlier feature instead of
                     requiring every useful signal to survive inside one cumulative residual stream.</p>
+                <h2 id="residual-context">Where AttnRes sits among residual designs</h2>
+                <p>Residual design is often framed as a stability problem, but it is also a memory-access problem.
+                    PreNorm keeps a clean identity path for gradients, yet repeatedly adds outputs to one running
+                    stream. PostNorm bounds the representation after each layer, but repeated normalization can weaken
+                    the direct gradient path. Other methods modify the immediate predecessor rather than providing
+                    direct access to old layers.</p>
+                <div class="compare-wrap">
+                    <table>
+                        <thead>
+                        <tr>
+                            <th>Family</th>
+                            <th>What layer l receives</th>
+                            <th>What changes</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        <tr>
+                            <td><strong>Standard residual</strong></td>
+                            <td>h<sub>l−1</sub> + f<sub>l−1</sub></td>
+                            <td>Fixed weight, one running stream.</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Highway / LayerScale</strong></td>
+                            <td>Gated or scaled previous stream</td>
+                            <td>Learned control, still only predecessor state.</td>
+                        </tr>
+                        <tr>
+                            <td><strong>DenseFormer</strong></td>
+                            <td>Static mixture of previous outputs</td>
+                            <td>Direct access, but coefficients are fixed after training.</td>
+                        </tr>
+                        <tr>
+                            <td><strong>AttnRes</strong></td>
+                            <td>Dynamic mixture of previous outputs</td>
+                            <td>Each depth chooses useful sources per input token.</td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p>AttnRes uses one pseudo-query w<sub>l</sub> per destination layer rather than deriving a query from
+                    the current activation. This may look restrictive, but it is deliberate: the source keys and values
+                    already change with the input, so the resulting weights remain input-dependent. More importantly,
+                    this decouples the cross-layer lookup from the layer’s forward computation, allowing the
+                    implementation to batch many depth queries efficiently.</p>
                 <h2 id="block">Block AttnRes makes it practical</h2>
                 <p>Full AttnRes needs each layer to read all earlier outputs, which is expensive at scale. Block AttnRes
                     splits L layers into N blocks. It stores one representation per completed block; within the current

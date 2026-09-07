@@ -101,6 +101,58 @@
     background: var(--yellow)
 }
 
+.lineage-diagram {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 11px;
+    margin: 28px 0 35px;
+    padding: 25px 14px 37px;
+    border: 1px solid var(--line);
+    background: #eeece5;
+    text-align: center
+}
+
+.lineage-diagram > div {
+    position: relative
+}
+
+.lineage-diagram b {
+    display: block;
+    min-width: 86px;
+    padding: 9px 7px;
+    background: var(--blue);
+    font: .62rem "DM Mono", monospace
+}
+
+.lineage-diagram .delta {
+    background: var(--yellow)
+}
+
+.lineage-diagram .gated {
+    background: #d9a6a0
+}
+
+.lineage-diagram .kda {
+    background: var(--coral)
+}
+
+.lineage-diagram small {
+    position: absolute;
+    top: 42px;
+    left: 50%;
+    transform: translateX(-50%);
+    white-space: nowrap;
+    color: var(--muted);
+    font: .54rem "DM Mono", monospace
+}
+
+.lineage-diagram i {
+    color: var(--coral);
+    font-size: 1.2rem;
+    font-style: normal
+}
+
 @media (max-width: 530px) {
     .dual-diagram {
         gap: 10px;
@@ -137,5 +189,21 @@
 
     .hybrid-diagram b {
         font-size: .55rem
+    }
+
+    .lineage-diagram {
+        gap: 4px;
+        padding-left: 3px;
+        padding-right: 3px
+    }
+
+    .lineage-diagram b {
+        min-width: 62px;
+        padding: 7px 3px;
+        font-size: .46rem
+    }
+
+    .lineage-diagram small {
+        font-size: .4rem
     }
 }
