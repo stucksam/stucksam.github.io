@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta name="description"
+          content="A technical map of the DeepSeek architecture lineage: dense LLMs, MLA, MoE, R1, million-token V4, and V4.1-Flash.">
+    <title>DeepSeek architectures — stucksam</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap"
+          rel="stylesheet">
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="stylesheet" href="../../attention/article.css">
+    <link rel="stylesheet" href="deepseek.css">
+</head>
+<body>
+<header class="site-header article-header"><a class="wordmark" href="../../" aria-label="stucksam home"><span
+        class="mark">∿</span> stucksam</a><a class="back-link" href="../">← Language models</a></header>
+<main class="article deepseek-article">
+    <article>
+        <header class="article-hero"><p class="eyebrow"><span></span> Architecture · field guide</p>
+            <p class="article-kicker">A lineage of co-designed bottlenecks.</p>
+            <h1>DeepSeek<br><em>architectures</em></h1>
+            <p class="article-dek">From dense language models to sparse, long-context, multimodal agent backbones—an
+                architectural story about memory movement, routing, depth, and reasoning.</p>
+            <div class="article-meta"><span>36 min read</span><span>Updated Sep 12, 2026</span><span>Primary sources linked</span>
+            </div>
+        </header>
+        <div class="article-layout">
+            <aside class="toc" aria-label="Table of contents"><p>ON THIS PAGE</p><a href="#paradigm">1. Paradigm</a><a
+                    class="toc-sub" href="#bottlenecks">Bottlenecks</a><a href="#dense">2. V1 &amp; VL foundations</a><a
+                    class="toc-sub" href="#v1-transformer">V1 transformer</a><a class="toc-sub" href="#vl-vision">VL
+                vision path</a><a
+                    href="#v3">3. V2 → V3 sparse scaling</a><a class="toc-sub" href="#mla-mechanics">MLA mechanics</a><a
+                    class="toc-sub" href="#moe-routing">MoE routing</a><a href="#r1">4. R1 reasoning via RL</a><a
+                    class="toc-sub" href="#grpo-equation">The GRPO objective</a><a href="#v4">5. Million-token V4</a><a
+                    href="#v41">6. V4.1-Flash</a><a href="#matrix">7. Technical matrix</a><a href="#sources">Sources</a>
+            </aside>
+            <div class="prose">
+                <p class="lead">This guide follows what changed inside the models. It begins with the dense text and
+                    vision models, then explains how later releases reduce cache memory, select expert networks, train
+                    reasoning behavior, and process very long agent histories.</p>
+                <div class="source-note"><strong>Scope note</strong><span>“V1” is convenient shorthand for the 2023 <em>DeepSeek LLM</em> dense family. V2 is included because it introduces MLA and DeepSeekMoE; V3 scales that recipe. R1 is a post-training methodology rather than a new Transformer backbone.</span>
+                </div>
+
+                <h2 id="paradigm">1. What changes from one generation to the next</h2>
+                <p>The first DeepSeek models use the standard dense Transformer pattern. Later releases address specific
+                    costs that emerge as models and context windows grow. A long prompt makes the KV cache expensive to
+                    read. An MoE layer needs to choose experts without overloading a few of them. A reasoning model
+                    needs a reliable way to reward good answers. A million-token agent must control both computation and
+                    storage across a very long history.</p>
+                <div class="roadmap" aria-label="DeepSeek architecture timeline">
+                    <div><b>2023</b><strong>Dense LLM</strong><span>7B / 67B · 2T tokens</span></div>
+                    <div><b>2024</b><strong>V2 → V3</strong><span>MLA · MoE · MTP</span></div>
+                    <div><b>2025</b><strong>R1</strong><span>GRPO · reasoning RL</span></div>
+                    <div><b>2026</b><strong>V4</strong><span>CSA · mHC · 1M context</span></div>
+                    <div><b>Sep ’26</b><strong>V4.1-Flash</strong><span>CED · CSA2 · 890 B/token</span></div>
+                </div>
+                <h3 id="bottlenecks">1.1 The costs the later models address</h3>
+                <p>For each generated token, a dense decoder reads the saved attention state for all earlier tokens. In
+                    MoE, each token must be sent to a small set of expert networks, and the training system must keep
+                    those experts in use. In reinforcement learning, a verifier must turn a complete response into a
+                    stable update. Later designs retain the normal Transformer operations where they work and change the
+                    part that has become expensive.</p>
+                <p class="math-label">THE BOTTLENECK MAP</p>
+                <div class="bottleneck-grid">
+                    <div><b>Decode bandwidth</b><span>MLA → CSA → CSA2 and low-bit cache</span></div>
+                    <div><b>MoE routing</b><span>Fine-grained experts; bias-based balancing</span></div>
+                    <div><b>Residual depth</b><span>mHC, then a single-pass implementation</span></div>
+                    <div><b>Reasoning data</b><span>Outcome rewards and GRPO, not only demonstrations</span></div>
+                    <div><b>Long-horizon agents</b><span>CED, bounded replay, conditional memory</span></div>
+                </div>
+                <p>“Open” does not mean each release exposes exactly the same artifacts. The papers, model cards,
+                    weights, and inference references make different parts of the stack inspectable. This guide keeps
+                    architecture claims tied to those first-party records rather than inferring them from benchmark
+                    tables.</p>
+
+                <h2 id="dense">2. DeepSeek LLM and DeepSeek-VL: the dense foundation</h2>
+                <h3>2.1 DeepSeek LLM: a text model before the sparse models</h3>
+                <p>DeepSeek LLM is the starting point for this lineage: a dense, decoder-only Transformer released in 7B
+                    and 67B sizes. “Dense” means every token passes through the same attention and feed-forward weights
+                    at every layer. It was trained on 2 trillion tokens, then adapted into chat models with supervised
+                    fine-tuning and DPO. The release also reports a scaling study used to choose the size and data
+                    budget for the 67B run. <a href="#s1">[1]</a></p>
+                <div class="spec-strip">
+                    <span><b>7B / 67B</b> dense models</span><span><b>2T</b> pre-training tokens</span><span><b>4K</b> context</span><span><b>SFT + DPO</b> chat alignment</span>
+                </div>
+                <h3 id="v1-transformer">2.1.1 The dense decoder: what one layer does</h3>
+                <p>Each layer receives one vector for every input token. It first lets the vector at position <em>t</em>
+                    read selected vectors from earlier positions. It then applies a separate feed-forward transformation
+                    to that token alone. Both results are added back to the running token vector through residual
+                    connections. Repeating this process lets later layers combine local syntax, long-range references,
+                    and task-specific patterns. “Causal” simply means the token at <em>t</em> can read tokens 1 through
+                    <em>t</em>, never a future token.</p>
+                <p class="math-label">CAUSAL SELF-ATTENTION</p>
+                <div class="equation compact-equation">Q = XW<sup>Q</sup>, &nbsp; K = XW<sup>K</sup>, &nbsp; V = XW<sup>V</sup><br><span>Attn</span>(X)
+                    = softmax((QK<sup>T</sup> / √d<sub>k</sub>) + M<sub>causal</sub>)V
+                </div>
+                <p><em>X</em> is the current sequence of token vectors. For each token, the model creates a query, key,
+                    and value. The query is compared with earlier keys; the resulting scores are converted into weights;
+                    those weights combine the earlier values. The causal mask makes every future score effectively zero.
+                    Multiple heads run this calculation with different projections, then the layer combines the head
+                    outputs. This is not a database lookup: the model learns the projections that decide what “relevant”
+                    should mean.</p>
+                <div class="layer-walkthrough">
+                    <div><b>1</b><strong>Attend</strong><span>read useful earlier token states</span></div>
+                    <div><b>2</b><strong>Mix</strong><span>add the attention update through a residual path</span></div>
+                    <div>
+                        <b>3</b><strong>Transform</strong><span>apply the per-token non-linear feed-forward block</span>
+                    </div>
+                    <div><b>4</b><strong>Repeat</strong><span>deeper layers compose broader abstractions</span></div>
+                </div>
+                <p>When generating text, the model does not recompute the keys and values for all previous tokens. It
+                    saves them in a <strong>KV cache</strong>. Generating the next token still requires reading that
+                    saved history in every layer. With a short prompt, this is cheap. With a long prompt, moving the
+                    cache from GPU memory can cost more time than the arithmetic in the layer. Later DeepSeek attention
+                    designs change what is stored in this cache; this first model provides the straightforward baseline.
+                </p>
+                <p class="math-label">DENSE PRE-TRAINING OBJECTIVE</p>
+                <div class="equation compact-equation">L<sub>NTP</sub> = − Σ<sub>t=1</sub><sup>T</sup> log p<sub>θ</sub>(x<sub>t</sub>
+                    | x<sub>&lt;t</sub>)
+                </div>
+                <p>The loss trains the model to assign a high probability to the actual next token. Over a very large
+                    corpus, that requires useful internal representations of language, code, facts, formatting, and
+                    common problem structures. For a fixed training budget, adding parameters without enough data wastes
+                    capacity; adding data without enough model capacity also wastes compute. DeepSeek LLM’s contribution
+                    at this stage was a carefully scaled, openly reported dense run—not a new attention mechanism. <a
+                            href="#s1">[1]</a></p>
+                <h3>2.1.2 From base model to chat model</h3>
+                <p>Pre-training teaches continuation, not necessarily helpful interaction. Supervised fine-tuning gives
+                    the model examples of an instruction and a desired response. DPO then presents two responses to the
+                    same prompt: one preferred and one rejected. It adjusts the model so the preferred response becomes
+                    more likely than the rejected one. These stages change the model’s response distribution; they do
+                    not add a new attention layer or alter the underlying dense decoder.</p>
+                <div class="equation compact-equation">L<sub>DPO</sub> = −log σ(β [log π<sub>θ</sub>(y<sup>+</sup>|x) −
+                    log π<sub>θ</sub>(y<sup>−</sup>|x) − reference offset])
+                </div>
+                <p>The reference term compares the updated model with the base model. It prevents a small preference
+                    dataset from pulling the model too far away from the broad behavior learned during pre-training. The
+                    result is a chat model built on the same architecture, with a different output preference.</p>
+                <h3 id="vl-vision">2.2 DeepSeek-VL: make vision part of pre-training</h3>
+                <p>DeepSeek-VL adds an image encoder in front of the language model. The image encoder turns pixels into
+                    a grid of vectors; a projector converts those vectors into the same width used by text tokens. The
+                    language model then receives one sequence containing image vectors and text vectors. It can answer a
+                    question about an image because its normal attention layers can read both types of vector.
+                    DeepSeek-VL uses a hybrid vision encoder with a high-resolution 1024 × 1024 path and a lower-cost
+                    path for ordinary images. <a href="#s2">[2]</a></p>
+                <div class="flow-diagram"><span>image<br><small>high resolution</small></span><i>→</i><span
+                        class="yellow-node">3×3<br>pixel-unshuffle</span><i>→</i><span class="blue-node">vision<br>embeddings</span><i>→</i><span
+                        class="coral-node">joint LM<br>sequence</span></div>
+                <p>The high-resolution path must reduce the number of vectors before handing them to the language model.
+                    A 3 × 3 pixel-unshuffle takes each nine-neighbour patch in a feature map and places its values in
+                    the channel dimension. A feature map of height <em>H</em> and width <em>W</em> becomes <em>H</em>/3
+                    by <em>W</em>/3; the channel count grows by nine. This preserves the local values while reducing the
+                    number of positions by 9×. Fewer positions mean fewer visual tokens and a much smaller attention
+                    cost.</p>
+                <p class="math-label">VISUAL TOKENS JOIN THE TEXT STREAM</p>
+                <div class="equation compact-equation">Z<sub>image</sub> = Project(VisionEncoder(PixelUnshuffle(I)))<br><span>X</span>
+                    = [Z<sub>image</sub> ; Embed(x<sub>1</sub>) ; … ; Embed(x<sub>T</sub>)]
+                </div>
+                <p>After projection, there is no separate visual answer head. Image vectors occupy positions in the same
+                    sequence as text vectors. A later attention layer can therefore connect the word “total” in a
+                    question with numbers in a chart or a table in a document. The final text token is still generated
+                    by the language model’s usual output head.</p>
+                <div class="callout"><strong>Training choice.</strong> DeepSeek-VL introduces image/text examples during
+                    multimodal pre-training instead of teaching the visual interface only after a text model is
+                    finished. This gives the shared decoder time to learn how image vectors and text vectors relate
+                    while retaining ordinary language training in the mix. The paper evaluates the resulting model on
+                    screenshots, documents, OCR, charts, and knowledge tasks. <a href="#s2">[2]</a></div>
+                <p>V4.1-Flash later makes this style of image-and-text processing part of a much larger agent model. The
+                    practical constraint remains the same: a higher-resolution image is only useful if the system can
+                    reduce it to a manageable number of tokens without discarding the detail needed for the task.</p>
+
+                <h2 id="v3">3. V2 and V3: reduce memory and compute per token</h2>
+                <p>V2 introduces the two structural changes that V3 later scales: Multi-Head Latent Attention for the
+                    attention cache and DeepSeekMoE for the feed-forward layers. V3 keeps those two structures, then
+                    changes how the experts are balanced and how the model is trained. Separating those contributions
+                    matters: MLA and DeepSeekMoE are V2 inventions; V3 is the much larger implementation of that
+                    direction.</p>
+                <h3 id="mla-mechanics">3.1 MLA: store a smaller representation of the past</h3>
+                <p>In standard attention, every layer saves keys and values for every earlier token. MLA changes the
+                    saved object. Instead of writing all of those key/value vectors into the cache, it first compresses
+                    the token state into a smaller vector <em>c</em><sub>t</sub><sup>KV</sup>. This smaller vector is
+                    what remains in memory. When a later token needs to attend to the past, the layer uses learned
+                    projections of the saved vector to perform the required key/value computation. <a href="#s3">[3]</a>
+                </p>
+                <p class="math-label">LOW-RANK KV COMPRESSION</p>
+                <div class="equation compact-equation"><span>c</span><sub>t</sub><sup>KV</sup> =
+                    W<sub>down</sub><sup>KV</sup>h<sub>t</sub> &nbsp; ; &nbsp; K<sub>t</sub><sup>C</sup>,
+                    V<sub>t</sub><sup>C</sup> = W<sub>up</sub><sup>K,V</sup><span>c</span><sub>t</sub><sup>KV</sup>
+                </div>
+                <p>Position information needs special treatment. Rotary position embeddings rotate a vector differently
+                    at each location, so they cannot be folded into one shared compressed representation without
+                    changing the attention calculation. MLA therefore keeps a small position-carrying key separate from
+                    the compressed content vector. The query and key each have a content part and a position part;
+                    attention adds the two matching signals together.</p>
+                <p>More concretely, the compressed vector is expanded into content keys and values. A separate small key
+                    carries RoPE. The layer then compares a content query with content keys and a position query with
+                    position keys. This preserves relative-position behavior while avoiding a full cached key/value
+                    tensor for every head and past token.</p>
+                <div class="equation compact-equation">q<sub>t</sub> = [q<sub>t</sub><sup>C</sup> ;
+                    RoPE(q<sub>t</sub><sup>R</sup>)] &nbsp; ; &nbsp; k<sub>t</sub> =
+                    [W<sub>up</sub><sup>K</sup>c<sub>t</sub><sup>KV</sup> ; RoPE(k<sub>t</sub><sup>R</sup>)]
+                </div>
+                <p>Some of the linear reconstruction can also be rearranged into the query-side calculation, so an
+                    implementation need not materialize every reconstructed key. The core idea is simpler than the
+                    algebra: keep a narrow representation in the persistent cache, and do the wider computation only
+                    when the current token needs it.</p>
+                <div class="compare-wrap">
+                    <table>
+                        <thead>
+                        <tr>
+                            <th>ATTENTION</th>
+                            <th>WHAT IS CACHED</th>
+                            <th>DECODE TRADE-OFF</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        <tr>
+                            <td>MHA</td>
+                            <td>independent K/V per head</td>
+                            <td>maximum flexibility, highest bandwidth</td>
+                        </tr>
+                        <tr>
+                            <td>GQA</td>
+                            <td>fewer shared K/V heads</td>
+                            <td>simple middle ground</td>
+                        </tr>
+                        <tr>
+                            <td>MLA</td>
+                            <td>KV latent + decoupled positional key</td>
+                            <td>compression with richer head structure</td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <h3 id="moe-routing">3.2 DeepSeekMoE: choose feed-forward weights per token</h3>
+                <p>In a dense Transformer, every token runs through the same feed-forward network after attention. In an
+                    MoE layer, the feed-forward network is split into many smaller networks called experts. A router
+                    reads the token vector, assigns scores to experts, and sends that token to only the selected
+                    experts. DeepSeekMoE also keeps shared experts that every token uses. V3 has 671B parameters in
+                    total, but executes about 37B for a given token. <a href="#s4">[4]</a>
+                </p>
+                <div class="moe-diagram"><span class="input-node">token state</span><i>→</i><span class="router-node">router<br><small>selects experts</small></span><i>→</i>
+                    <div class="expert-box"><b>shared</b><b>e₁</b><b>e₂</b><b>e₃</b><b>…</b></div>
+                    <i>→</i><span class="output-node">mixed update</span></div>
+                <p>Without a balancing mechanism, a router can keep selecting a few popular experts. Those experts then
+                    become overloaded while other parameters receive little training. A common solution adds a second
+                    loss that rewards even traffic. V3 does not add that loss to the optimization target. Instead, it
+                    changes the router’s expert scores with a per-expert bias: if an expert received too much traffic,
+                    its bias is lowered for the next update; if it received too little, its bias is raised. The main
+                    language-model loss remains responsible for deciding which experts are useful.</p>
+                <p class="math-label">SPARSE EXPERT MIXTURE</p>
+                <div class="equation compact-equation"><span>y</span> = FFN<sub>shared</sub>(x) + Σ<sub>i ∈
+                    TopK(x)</sub> g<sub>i</sub>(x) · FFN<sub>i</sub>(x)
+                </div>
+                <p>The router produces a score for every routed expert, keeps the highest-scoring <em>K</em>, and uses
+                    the normalized scores <em>g</em><sub>i</sub> to mix their outputs. The shared output is added for
+                    every token. “671B total / 37B active” therefore describes two different quantities: total stored
+                    capacity and the computation used by one token. This is how the model can grow its parameter count
+                    without paying the full dense-model compute cost on every token.</p>
+                <h3>3.3 Multi-token prediction: densify the learning signal</h3>
+                <p>V3 adds a multi-token prediction (MTP) module. The normal language-model loss teaches position
+                    <em>t</em> to predict only the next token. MTP also asks the model to predict several later tokens
+                    in order. During inference, those additional predictions can be used as a draft that the main model
+                    checks. The full V3 run used 14.8T tokens and 2.788M H800 GPU-hours for complete training. <a
+                            href="#s4">[4]</a></p>
+                <p>Ordinary next-token prediction gives the hidden state at position <em>t</em> one direct target:
+                    <em>x</em><sub>t+1</sub>. MTP adds targets for the next <em>D</em> positions while preserving a
+                    causal chain between prediction depths. That asks the representation at <em>t</em> to remain useful
+                    slightly farther into the future, rather than treating “next” as the only learning horizon.</p>
+                <div class="equation compact-equation">L<sub>MTP</sub> = − Σ<sub>t</sub> Σ<sub>k=1</sub><sup>D</sup> log
+                    p<sub>θ</sub>(x<sub>t+k</sub> | x<sub>≤t</sub>, x<sub>t+1…t+k−1</sub>)
+                </div>
+                <p>At serving time, the same extra prediction depths can propose a short continuation. The larger model
+                    then verifies that proposal in parallel. If it agrees on several tokens, the server advances several
+                    positions at once; if it disagrees, it falls back to the accepted prefix. MTP therefore links a
+                    training objective to a potential decoding speedup, although the main model remains the
+                    authority.</p>
+
+                <h2 id="r1">4. DeepSeek-R1: reasoning as an optimization target</h2>
+                <h3 id="grpo-equation">4.1 R1-Zero: start with rewards, not demonstrations</h3>
+                <p>DeepSeek-R1-Zero applies large-scale RL directly to a base model, before supervised fine-tuning. For
+                    verifiable problems, rewards can judge the outcome while leaving the route to the model. Using Group
+                    Relative Policy Optimization (GRPO), a group of sampled answers provides the relative baseline,
+                    avoiding a separate learned critic. <a href="#s5">[5]</a></p>
+                <div class="grpo">
+                    <span>prompt</span><i>→</i><span>sample a group</span><i>→</i><span>verify outcomes</span><i>→</i><span
+                        class="coral-node">relative advantage<br>updates policy</span></div>
+                <p>For a prompt <em>q</em>, GRPO samples a group of outputs
+                    <em>o</em><sub>1</sub>…<em>o</em><sub>G</sub> from the old policy. A verifier supplies rewards
+                    <em>r</em><sub>i</sub>—for example, whether a mathematical answer is correct or a program passes
+                    tests. Each result is judged relative to its peers in the same group:</p>
+                <p class="math-label">GROUP-RELATIVE ADVANTAGE</p>
+                <div class="equation compact-equation"><span>A</span><sub>i</sub> = (r<sub>i</sub> −
+                    mean(r<sub>1…G</sub>)) / (std(r<sub>1…G</sub>) + ε)
+                </div>
+                <p>A correct completion in a mostly incorrect group receives a positive advantage; a weak completion in
+                    a strong group receives a negative one. This replaces the learned value network used by many
+                    actor-critic methods with a within-group baseline. It is especially practical when the reward is
+                    cheap and reliable but step-by-step human reasoning labels are not.</p>
+                <p class="math-label">SIMPLIFIED GRPO UPDATE</p>
+                <div class="equation compact-equation">max<sub>θ</sub> E[ min(ρ<sub>i</sub>A<sub>i</sub>,
+                    clip(ρ<sub>i</sub>, 1−ε, 1+ε)A<sub>i</sub>) − βD<sub>KL</sub>(π<sub>θ</sub> || π<sub>ref</sub>)
+                    ]<br><small>ρ<sub>i</sub> = π<sub>θ</sub>(o<sub>i</sub>|q) /
+                        π<sub>old</sub>(o<sub>i</sub>|q)</small></div>
+                <p>The ratio <em>ρ</em> asks how much more or less likely the updated policy makes an already sampled
+                    output. Clipping prevents a single update from changing that probability too aggressively. The KL
+                    term anchors the policy to a reference model so reward hacking does not immediately erase useful
+                    language behavior. This is the optimization machinery behind the headline “RL without SFT,” not a
+                    claim that the model somehow learns without supervision: the verifier is still a crucial source of
+                    signal.</p>
+                <p>The important reported behavior is extended chains of thought, reflection, answer checking, and
+                    changing strategy without human-written reasoning traces. But pure RL also created language mixing,
+                    readability issues, and repetitive loops. Emergence is not the same as a finished user
+                    experience.</p>
+                <h3>4.2 R1: cold start, RL, and consolidation</h3>
+                <p>DeepSeek-R1 starts from a small, curated cold-start set with readable chain-of-thought formatting. It
+                    then alternates supervised stages, GRPO reasoning training, rejection sampling, and a final
+                    all-scenarios RL phase. R1 is not “R1-Zero plus more RL”; the cold start controls format and the
+                    later pipeline broadens capability while keeping the reasoning policy.</p>
+                <h3>4.3 Distillation: transfer the behavior, not only answers</h3>
+                <p>R1 reasoning traces were distilled into dense Qwen and Llama models from 1.5B through 70B parameters.
+                    The paper’s lesson is unusually direct: smaller models trained on long-CoT outputs can beat
+                    same-size models trained only on human demonstrations. The teacher supplies a distribution of
+                    reasoning behavior that a plain answer label does not contain. <a href="#s5">[5]</a></p>
+
+                <h2 id="v4">5. DeepSeek-V4: attention that can use a million-token prompt</h2>
+                <p>A million-token context is not useful if reading it costs too much for each generated token. V4
+                    changes the attention path so a token does not compare itself with every past token at full cost.
+                    The public family includes V4-Flash (284B total parameters, 13B active) and V4-Pro (1.6T total, 49B
+                    active), both with a 1M-token context window and more than 32T pre-training tokens. <a href="#s6">[6]</a>
+                </p>
+                <h3>5.1 Hybrid attention: select distant information and compress the rest</h3>
+                <p>V4 uses two global attention paths. Compressed Sparse Attention (CSA) uses an index to select a small
+                    set of relevant positions from the distant history, then reads those positions in more detail.
+                    Heavily Compressed Attention (HCA) carries a compact summary of the broader history. The model can
+                    therefore preserve direct access to selected long-range facts while maintaining a lower-cost global
+                    signal for everything else. In DeepSeek’s reported 1M-token comparison, V4-Pro uses 27% of V3.2’s
+                    single-token inference FLOPs and 10% of its KV cache. <a href="#s6">[6]</a></p>
+                <div class="attention-bands"><span class="local">local path<br><small>nearby detail</small></span><span
+                        class="global">CSA<br><small>sparse global reads</small></span><span
+                        class="compressed">HCA<br><small>compressed global path</small></span></div>
+                <h3>5.2 mHC: use several residual streams without destabilising depth</h3>
+                <p>A normal residual block carries one main vector forward and adds a learned update to it. mHC keeps
+                    several parallel residual vectors. A block reads a mixture of these vectors, computes its update,
+                    and writes mixtures back to them. This creates more routes for information than a single residual
+                    stream, but it also introduces a risk: repeated unrestricted mixing can amplify or erase signals as
+                    the number of layers grows. <a href="#s7">[7]</a></p>
+                <p class="math-label">RESIDUAL STREAM MULTIPLICITY</p>
+                <div class="equation compact-equation"><span>X</span><sub>l</sub> ∈ ℝ<sup>n×d</sup> &nbsp; → &nbsp;
+                    <span>X</span><sub>l+1</sub> = <span>H</span><sub>l</sub>(<span>X</span><sub>l</sub>), &nbsp; with
+                    constrained stream-mixing maps
+                </div>
+                <p>A standard residual block is <em>x</em><sub>l+1</sub> = <em>x</em><sub>l</sub> +
+                    <em>F</em><sub>l</sub>(<em>x</em><sub>l</sub>). Hyper-connections replace <em>x</em> with a set of
+                    streams and use matrices to mix them before and after <em>F</em>. mHC constrains those matrices to
+                    be non-negative and to have rows and columns that sum to one. The constraint means a matrix can
+                    redistribute information across streams but cannot arbitrarily scale the total signal up or down.
+                    That preserves the stabilising role normally played by the identity residual path.</p>
+                <p>V4 also uses Muon for hidden linear layers. At a high level, Muon changes the direction and scale of
+                    matrix updates so training can make progress without unstable parameter changes. It is an
+                    optimization choice, separate from CSA/HCA attention and separate from the residual-stream design.
+                    <a href="#s6">[6]</a></p>
+
+                <h2 id="v41">6. DeepSeek-V4.1-Flash: reduce the cost of long-running agents</h2>
+                <p>Released September 10, 2026, V4.1-Flash is a 552B-backbone multimodal MoE with a 1M-token context. It
+                    is designed around the fact that an agent spends time in two very different phases. First it reads a
+                    large prompt, tool history, and files. Then it generates a response one token at a time. V4.1 uses
+                    different amounts of computation and different cache layouts for those two phases. <a
+                            href="#s8">[8]</a> <a href="#s9">[9]</a></p>
+                <h3>6.1 Causal Encoder–Decoder: read the prompt once, reuse its result</h3>
+                <p>The 40 Transformer layers are split into 20 causal encoder layers and 20 decoder layers. During
+                    prefill, the encoder reads the input sequence and produces final hidden states. The decoder’s global
+                    keys and values are projected from those encoder states instead of being independently built from
+                    every decoder layer’s own hidden states. This changes where global history is stored and reduces the
+                    work required to ingest a long prompt.</p>
+                <div class="ced">
+                    <div><b>20 causal encoder layers</b><span>prefill · 8B active/token</span></div>
+                    <i>→ global KV projection →</i>
+                    <div><b>20 decoder layers</b><span>decode · 16B active/token</span></div>
+                </div>
+                <h3>6.2 CSA2: share the expensive search between layers</h3>
+                <p>Sparse attention needs an indexer: a smaller computation that decides which past positions are worth
+                    reading. CSA2 gives each attention layer one of three fixed jobs. A <strong>Full</strong> layer
+                    creates new main keys/values, indexer keys and queries, and a new Top-K list of positions. A
+                    <strong>Reindex</strong> layer reuses the main keys/values and indexer keys from a previous layer,
+                    but uses its own query to choose a new Top-K list. A <strong>Reuse</strong> layer uses both the
+                    existing keys/values and the existing Top-K list. It does not run the indexer at all. <a href="#s9">[9]</a>
+                </p>
+                <div class="mode-grid">
+                    <div><b>Full</b><span>new KV · K/Q · Top-K</span></div>
+                    <div><b>Reindex</b><span>reuse KV/K · new Q / Top-K</span></div>
+                    <div><b>Reuse</b><span>reuse KV and Top-K</span></div>
+                </div>
+                <p>Later decoder layers use a hierarchical index: they search only within a candidate set selected by an
+                    earlier Full layer. This prevents every layer from scanning the entire million-token history. The
+                    main cache is also stored in FP4, with quantization-aware training preparing the model for that
+                    low-precision format. DeepSeek reports a global cache footprint of 890 bytes per token—about one
+                    quarter of V4-Flash in its measurement. This is a measurement for this specific architecture and
+                    cache layout, not a universal comparison of all attention implementations.</p>
+                <h3>6.3 Do not persist cache state that can be cheaply rebuilt</h3>
+                <p>Sliding-window attention needs a recent local history. Persisting that local KV state for a long
+                    agent trace would consume substantial SSD storage. SWA Bounded Replay instead rebuilds missing local
+                    state by replaying only the most recent <em>n</em><sub>win</sub> tokens. DeepSeek reports that this
+                    reduces persistent cache storage to roughly one eighth of V4-Flash. Single-Pass mHC similarly
+                    reduces memory traffic inside the residual mixing calculation by arranging the mixing coefficients
+                    so the implementation needs fewer separate passes.</p>
+                <p><strong>Engram</strong> is a conditional n-gram table with 196B parameters. A token pattern can look
+                    up a small part of that table, rather than asking the Transformer to store every frequent
+                    continuation in its active computation. <strong>DSpark</strong> is a speculative decoding method: it
+                    drafts several tokens, then verifies them with the main model according to a confidence schedule.
+                    These pieces solve different problems: Engram stores conditional memorized patterns; bounded replay
+                    controls persistent cache size; DSpark reduces the number of full decode steps. <a
+                            href="#s9">[9]</a></p>
+                <h3>6.4 Post-training: make thought length a runtime dial</h3>
+                <p>V4.1-Flash uses SFT, reinforcement learning, and on-policy distillation, with synthetic agent tasks
+                    and environments used to create more training situations. Its public interface exposes integer
+                    reasoning effort from 1 to 100. A larger setting gives the model a larger thinking budget; it can
+                    also increase latency and generated-token cost. The right setting depends on whether a task benefits
+                    from additional verification and planning. <a href="#s9">[9]</a>
+                </p>
+
+                <h2 id="matrix">7. Comparative technical matrix</h2>
+                <div class="compare-wrap matrix">
+                    <table>
+                        <thead>
+                        <tr>
+                            <th>FAMILY</th>
+                            <th>PARAMETERS</th>
+                            <th>ATTENTION / MEMORY</th>
+                            <th>CONTEXT</th>
+                            <th>PRIMARY SOLUTION</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        <tr>
+                            <td><strong>DeepSeek LLM</strong><br><small>2023</small></td>
+                            <td>7B / 67B dense</td>
+                            <td>MHA</td>
+                            <td>4K</td>
+                            <td>open dense scaling baseline</td>
+                        </tr>
+                        <tr>
+                            <td><strong>V2 → V3</strong><br><small>2024</small></td>
+                            <td>671B / 37B active (V3)</td>
+                            <td>MLA + DeepSeekMoE</td>
+                            <td>128K (V3)</td>
+                            <td>KV bandwidth and expert balance</td>
+                        </tr>
+                        <tr>
+                            <td><strong>R1</strong><br><small>2025</small></td>
+                            <td>671B / 37B active</td>
+                            <td>V3 backbone; GRPO post-training</td>
+                            <td>long reasoning output</td>
+                            <td>reasoning policy and distillation</td>
+                        </tr>
+                        <tr>
+                            <td><strong>V4-Flash / Pro</strong><br><small>2026</small></td>
+                            <td>284B / 13B; 1.6T / 49B</td>
+                            <td>CSA + HCA + mHC</td>
+                            <td>1M</td>
+                            <td>global attention and deep stability</td>
+                        </tr>
+                        <tr>
+                            <td><strong>V4.1-Flash</strong><br><small>Sep 2026</small></td>
+                            <td>552B; 8B prefill / 16B decode active</td>
+                            <td>CED + CSA2 + bounded replay</td>
+                            <td>1M</td>
+                            <td>agent prefill cost and persistent KV</td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="callout"><strong>Selection heuristic.</strong> Use a dense model when simplicity, hardware
+                    fit, or short context dominates. Choose V3-style MLA/MoE where serving memory and active compute
+                    bind. Use R1-style reasoning or distillation when the task has reliable verification. For very long,
+                    tool-heavy traces, V4 and V4.1’s context and cache design matter more than a headline parameter
+                    count; set reasoning effort to the smallest budget that reliably clears the task.
+                </div>
+                <hr>
+                <section class="sources" id="sources"><strong>Primary sources</strong>
+                    <ol>
+                        <li id="s1"><a href="https://arxiv.org/abs/2401.02954">DeepSeek LLM: Scaling Open-Source
+                            Language Models with Longtermism</a> (2024).
+                        </li>
+                        <li id="s2"><a href="https://arxiv.org/abs/2403.05525">DeepSeek-VL: Towards Real-World
+                            Vision-Language Understanding</a> (2024).
+                        </li>
+                        <li id="s3"><a href="https://arxiv.org/abs/2405.04434">DeepSeek-V2: A Strong, Economical, and
+                            Efficient Mixture-of-Experts Language Model</a> (2024).
+                        </li>
+                        <li id="s4"><a href="https://arxiv.org/abs/2412.19437">DeepSeek-V3 Technical Report</a> (2024).
+                        </li>
+                        <li id="s5"><a href="https://arxiv.org/abs/2501.12948">DeepSeek-R1: Incentivizing Reasoning
+                            Capability in LLMs via Reinforcement Learning</a> (2025).
+                        </li>
+                        <li id="s6"><a href="https://arxiv.org/abs/2606.19348">DeepSeek-V4: Towards Highly Efficient
+                            Million-Token Context Intelligence</a> (2026).
+                        </li>
+                        <li id="s7"><a href="https://arxiv.org/abs/2512.24880">mHC: Manifold-Constrained
+                            Hyper-Connections</a> (2025).
+                        </li>
+                        <li id="s8"><a href="https://deepseek.com/en/news/deepseek-v4-1-flash/">DeepSeek release
+                            announcement: V4.1-Flash</a> (September 10, 2026).
+                        </li>
+                        <li id="s9"><a href="https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash">DeepSeek-V4.1-Flash:
+                            Pushing the Limits of KV Cache Compression</a> (official model card and technical report,
+                            2026).
+                        </li>
+                    </ol>
+                </section>
+            </div>
+        </div>
+    </article>
+</main>
+<footer><a class="wordmark" href="../../"><span class="mark">∿</span> stucksam</a>
+    <p>Notes on learning machines, in public.</p><span>© 2026</span></footer>
+</body>
+</html>
