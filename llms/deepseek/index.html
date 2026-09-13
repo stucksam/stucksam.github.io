@@ -34,8 +34,9 @@
                 vision path</a><a
                     href="#v3">3. V2 → V3 sparse scaling</a><a class="toc-sub" href="#mla-mechanics">MLA mechanics</a><a
                     class="toc-sub" href="#moe-routing">MoE routing</a><a href="#r1">4. R1 reasoning via RL</a><a
-                    class="toc-sub" href="#grpo-equation">The GRPO objective</a><a href="#v4">5. Million-token V4</a><a
-                    href="#v41">6. V4.1-Flash</a><a href="#matrix">7. Technical matrix</a><a href="#sources">Sources</a>
+                    class="toc-sub" href="#grpo-equation">The GRPO objective</a><a href="#v31">5. V3.1 bridge</a><a
+                    href="#v32">6. V3.2 and DSA</a><a class="toc-sub" href="#dsa-v32">Sparse attention</a><a
+                    href="#v4">7. Million-token V4</a><a href="#v41">8. V4.1-Flash</a><a href="#matrix">9. Technical matrix</a><a href="#sources">Sources</a>
             </aside>
             <div class="prose">
                 <p class="lead">This guide follows what changed inside the models. It begins with the dense text and
@@ -53,7 +54,7 @@
                 <div class="roadmap" aria-label="DeepSeek architecture timeline">
                     <div><b>2023</b><strong>Dense LLM</strong><span>7B / 67B · 2T tokens</span></div>
                     <div><b>2024</b><strong>V2 → V3</strong><span>MLA · MoE · MTP</span></div>
-                    <div><b>2025</b><strong>R1</strong><span>GRPO · reasoning RL</span></div>
+                    <div><b>2025</b><strong>R1, V3.1, V3.2</strong><span>GRPO, hybrid thinking, DSA</span></div>
                     <div><b>2026</b><strong>V4</strong><span>CSA · mHC · 1M context</span></div>
                     <div><b>Sep ’26</b><strong>V4.1-Flash</strong><span>CED · CSA2 · 890 B/token</span></div>
                 </div>
@@ -326,7 +327,36 @@
                     same-size models trained only on human demonstrations. The teacher supplies a distribution of
                     reasoning behavior that a plain answer label does not contain. <a href="#s5">[5]</a></p>
 
-                <h2 id="v4">5. DeepSeek-V4: attention that can use a million-token prompt</h2>
+                <h2 id="v31">5. DeepSeek-V3.1: longer context and one model for two response styles</h2>
+                <p>V3.1 keeps the V3 Transformer structure. It uses the same MLA attention, DeepSeekMoE layers, and multi-token prediction modules. The important changes are continued long-context training, an updated quantized tensor format, and post-training that lets one checkpoint produce either a reasoning trace or a direct answer. It belongs in the lineage because it connects V3’s general chat model with the reasoning and agent work that follows, not because it introduces a new attention mechanism. <a href="#s11">[11]</a></p>
+                <h3>5.1 Continue training on long documents</h3>
+                <p>Starting from V3, DeepSeek continued training on 840B additional tokens. It used 630B tokens in a 32K-context phase and 209B tokens in a 128K phase. The published context window remains 128K tokens. This work strengthens how the existing model handles long prompts. It does not make V3.1 a million-token model or change the MLA calculation.</p>
+                <h3>5.2 Hybrid thinking is selected by the prompt</h3>
+                <p>V3.1 is post-trained so the same weights can follow two different response formats. To request a visible reasoning trace, the chat template starts the assistant response with <code>&lt;think&gt;</code>. To request a direct response, it starts with <code>&lt;/think&gt;</code>. The model then continues in the style indicated by that token. This is not internal switching between two models. It is one causal decoder that has learned two response patterns during post-training.</p>
+                <p>That distinction is useful when comparing V3.1 with R1. R1 uses a specialised reasoning post-training pipeline. V3.1 makes reasoning effort a prompt-level choice in one general model. The choice changes the expected output style and token budget, not the attention mechanism or the set of model weights used for a token.</p>
+                <h3>5.3 Tool calls are part of the surrounding agent loop</h3>
+                <p>V3.1 also receives post-training for structured tool calls and multi-step agents. In non-thinking mode, it can emit a tool name and JSON arguments in a documented format. The application outside the model executes the tool and places the result back in the next prompt. DeepSeek also documents a separate thinking-mode format for search agents. Neither format gives the model an internal search engine. They teach the model how to ask an external system for information and how to use the returned text.</p>
+                <p>The release also changes the tokenizer and chat template. Its FP8 weights and activations use UE8M0 scale tensors for microscaling compatibility. These are deployment and interface changes. They affect how serving software formats prompts and reads quantized weights, but they do not alter the Transformer architecture.</p>
+
+                <h2 id="v32">6. DeepSeek-V3.2: sparse reads, larger RL, and agent training</h2>
+                <p>V3.2 is a continuation of the V3.1 family, not a new MoE backbone. The paper states that its only architectural change from V3.1-Terminus is DeepSeek Sparse Attention, or DSA, added through continued training. It then expands post-training with a more stable GRPO implementation and a large synthetic-task pipeline for tool-using agents. This makes V3.2 the bridge from V3’s latent cache to V4’s compressed sparse attention. <a href="#s10">[10]</a></p>
+                <h3 id="dsa-v32">6.1 DSA: choose which MLA cache entries to read</h3>
+                <p>MLA makes each cached token smaller, but normal MLA attention still reads every cached latent when a new token attends to the past. DSA adds a small indexer before the main attention operation. For the current token, the indexer assigns a score to every earlier token. The model keeps only the Top-K scores and gives the corresponding MLA latent entries to the main attention calculation.</p>
+                <div class="flow-diagram"><span>MLA cache<br><small>one latent per token</small></span><i>→</i><span class="yellow-node">lightning indexer<br><small>scores past tokens</small></span><i>→</i><span class="blue-node">Top-K entries<br><small>selected latents</small></span><i>→</i><span class="coral-node">main attention<br><small>value read</small></span></div>
+                <p class="math-label">TOKEN-LEVEL SPARSE SELECTION</p>
+                <div class="equation compact-equation">I<sub>t,s</sub> = Σ<sub>j</sub> w<sub>t,j</sub><sup>I</sup> · ReLU(q<sub>t,j</sub><sup>I</sup> · k<sub>s</sub><sup>I</sup>)<br>S<sub>t</sub> = TopK(I<sub>t,: </sub>), &nbsp; u<sub>t</sub> = Attention(h<sub>t</sub>, {c<sub>s</sub> | s ∈ S<sub>t</sub>})</div>
+                <p>The indexer uses small query and key vectors and few heads. It is cheaper than the main attention path and can use FP8. Its score does not replace attention weights. It is a retrieval score that answers which entries the main attention should examine. The selected entries are then read through MLA in MQA mode, where the same latent KV entry is shared across the query heads. DeepSeek reports selecting 2,048 KV tokens for each query during sparse training.</p>
+                <p>DSA reduces the main attention work from O(<em>L</em><sup>2</sup>) to O(<em>Lk</em>), where <em>L</em> is context length and <em>k</em> is the number of selected tokens. The indexer still compares across the full sequence, so the system is not fully linear. It is nevertheless much cheaper than running main attention over the entire sequence. DSA is an intermediate step that learns token-level retrieval over MLA latents. V4 later compresses tokens into blocks and retrieves those blocks.</p>
+                <h3>6.2 Teach the indexer before making attention sparse</h3>
+                <p>Turning on selection with an untrained indexer would hide useful tokens from the model. V3.2 therefore starts with dense attention and freezes the main model. During this warm-up, only the indexer trains. It learns to match the distribution of attention mass produced by the existing dense attention heads:</p>
+                <div class="equation compact-equation">L<sub>index</sub> = Σ<sub>t</sub> D<sub>KL</sub>(p<sub>t,: </sub> || softmax(I<sub>t,: </sub>))</div>
+                <p>After 1,000 warm-up steps, V3.2 enables Top-K selection and trains the full model on the sparse pattern. The indexer keeps its own alignment loss. The main model keeps the language-model loss. This separates the jobs. The indexer learns to retrieve entries that dense attention would have used, while the main model learns to work with the entries it receives.</p>
+                <h3>6.3 Post-training changes: make larger RL runs stable</h3>
+                <p>V3.2 keeps GRPO but adds practical safeguards for larger-scale runs. Its revised KL estimate corrects for the fact that responses were generated by an older policy. Off-policy sequence masking drops negative training samples when the current model has moved too far from the model that generated them. “Keep Routing” preserves the MoE expert choices used during sampling when training on the same sequence. Without it, the training step could optimise a different set of expert weights from the ones that produced the response. “Keep Sampling Mask” applies the same top-p and top-k token mask during training that was used while sampling, so the two policies are compared over the same choices. <a href="#s10">[10]</a></p>
+                <h3>6.4 Agent data: combine reasoning with tool use</h3>
+                <p>V3.2’s paper also describes a large-scale agent-task synthesis pipeline with more than 1,800 environments and 85,000 complex prompts. The training traces combine thinking with tool calls rather than treating them as unrelated skills. For tool outputs that arrive during the same user request, V3.2 keeps the earlier reasoning trace in context, avoiding repeated reasoning from scratch. When a new user request arrives, it discards that reasoning trace but preserves the tool-call history and results. This is a context-management policy, not a change to DSA itself.</p>
+
+                <h2 id="v4">7. DeepSeek-V4: attention that can use a million-token prompt</h2>
                 <p>A million-token context is not useful if reading it costs too much for each generated token. V4
                     changes the attention path so a token does not compare itself with every past token at full cost.
                     The public family includes V4-Flash (284B total parameters, 13B active) and V4-Pro (1.6T total, 49B
@@ -364,7 +394,7 @@
                     optimization choice, separate from CSA/HCA attention and separate from the residual-stream design.
                     <a href="#s6">[6]</a></p>
 
-                <h2 id="v41">6. DeepSeek-V4.1-Flash: reduce the cost of long-running agents</h2>
+                <h2 id="v41">8. DeepSeek-V4.1-Flash: reduce the cost of long-running agents</h2>
                 <p>Released September 10, 2026, V4.1-Flash is a 552B-backbone multimodal MoE with a 1M-token context. It
                     is designed around the fact that an agent spends time in two very different phases. First it reads a
                     large prompt, tool history, and files. Then it generates a response one token at a time. V4.1 uses
@@ -422,7 +452,7 @@
                     from additional verification and planning. <a href="#s9">[9]</a>
                 </p>
 
-                <h2 id="matrix">7. Comparative technical matrix</h2>
+                <h2 id="matrix">9. Comparative technical matrix</h2>
                 <div class="compare-wrap matrix">
                     <table>
                         <thead>
@@ -455,6 +485,20 @@
                             <td>V3 backbone; GRPO post-training</td>
                             <td>long reasoning output</td>
                             <td>reasoning policy and distillation</td>
+                        </tr>
+                        <tr>
+                            <td><strong>V3.1</strong><br><small>2025</small></td>
+                            <td>671B / 37B active</td>
+                            <td>V3 MLA, MoE, and MTP unchanged</td>
+                            <td>128K</td>
+                            <td>long-context continuation, hybrid thinking, and tool formats</td>
+                        </tr>
+                        <tr>
+                            <td><strong>V3.2</strong><br><small>2025</small></td>
+                            <td>V3.1 continuation</td>
+                            <td>MLA + DSA token selection</td>
+                            <td>128K</td>
+                            <td>sparse long-context reads and agentic RL</td>
                         </tr>
                         <tr>
                             <td><strong>V4-Flash / Pro</strong><br><small>2026</small></td>
@@ -509,6 +553,8 @@
                             Pushing the Limits of KV Cache Compression</a> (official model card and technical report,
                             2026).
                         </li>
+                        <li id="s10"><a href="https://arxiv.org/abs/2512.02556">DeepSeek-V3.2: Pushing the Frontier of Open Large Language Models</a> (2025).</li>
+                        <li id="s11"><a href="https://huggingface.co/deepseek-ai/DeepSeek-V3.1">DeepSeek-V3.1 model card</a> (2025).</li>
                     </ol>
                 </section>
             </div>
