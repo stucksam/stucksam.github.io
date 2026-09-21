@@ -356,11 +356,35 @@ td:first-child, th:first-child {
     text-align: center;
 }
 
-.attention-pipeline b, .csa2-modes b { display: block; font: 600 .76rem var(--mono); }
-.attention-pipeline span, .csa2-modes span { display: block; margin-top: 5px; color: var(--muted); font-size: .74rem; line-height: 1.35; }
-.attention-pipeline i { align-self: center; color: var(--muted); font-style: normal; font-size: 1.25rem; }
-.attention-pipeline .select-node { border-color: #d76d59; background: #fff4f0; }
-.attention-pipeline .compress-node { border-color: #d3ad41; background: #fff9e6; }
+.attention-pipeline b, .csa2-modes b {
+    display: block;
+    font: 600 .76rem var(--mono);
+}
+
+.attention-pipeline span, .csa2-modes span {
+    display: block;
+    margin-top: 5px;
+    color: var(--muted);
+    font-size: .74rem;
+    line-height: 1.35;
+}
+
+.attention-pipeline i {
+    align-self: center;
+    color: var(--muted);
+    font-style: normal;
+    font-size: 1.25rem;
+}
+
+.attention-pipeline .select-node {
+    border-color: #d76d59;
+    background: #fff4f0;
+}
+
+.attention-pipeline .compress-node {
+    border-color: #d3ad41;
+    background: #fff9e6;
+}
 
 .csa2-modes {
     display: grid;
@@ -369,15 +393,34 @@ td:first-child, th:first-child {
     margin: 26px 0;
 }
 
-.csa2-modes div:first-child { border-top: 3px solid #436d96; }
-.csa2-modes div:nth-child(2) { border-top: 3px solid #d3ad41; }
-.csa2-modes div:last-child { border-top: 3px solid #d76d59; }
+.csa2-modes div:first-child {
+    border-top: 3px solid #436d96;
+}
+
+.csa2-modes div:nth-child(2) {
+    border-top: 3px solid #d3ad41;
+}
+
+.csa2-modes div:last-child {
+    border-top: 3px solid #d76d59;
+}
 
 @media (max-width: 700px) {
-    .attention-pipeline { flex-wrap: wrap; }
-    .attention-pipeline i { display: none; }
-    .attention-pipeline div { flex: 1 1 42%; }
-    .csa2-modes { grid-template-columns: 1fr; }
+    .attention-pipeline {
+        flex-wrap: wrap;
+    }
+
+    .attention-pipeline i {
+        display: none;
+    }
+
+    .attention-pipeline div {
+        flex: 1 1 42%;
+    }
+
+    .csa2-modes {
+        grid-template-columns: 1fr;
+    }
 }
 
 @media (max-width: 530px) {

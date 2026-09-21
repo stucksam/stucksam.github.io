@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <meta name="description" content="A practical guide to dense, compressed, sparse, and cache-aware attention mechanisms."/>
+    <meta name="description"
+          content="A practical guide to dense, compressed, sparse, and cache-aware attention mechanisms."/>
     <title>Attention mechanisms — stucksam</title>
     <link rel="preconnect" href="https://fonts.googleapis.com"/>
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -35,8 +36,8 @@
                 <a href="#mha">Multi-head attention</a>
                 <a href="#mqa">Multi-query attention</a>
                 <a href="#mla">Multi-head latent attention</a>
-                <a href="#dsa">DeepSeek Sparse Attention</a>
                 <a href="#sparse">Sparse attention</a>
+                <a href="#dsa">DeepSeek Sparse Attention</a>
                 <a href="#csa">Compressed Sparse Attention</a>
                 <a href="#hca">Heavily Compressed Attention</a>
                 <a href="#csa2">CSA2</a>
@@ -257,53 +258,218 @@ class MultiHeadLatentAttention(nn.Module):
         y = torch.cat((y, torch.zeros_like(q_r)), -1).transpose(1,2).reshape(B,T,D)
         return self.out(y)</code></pre>
 
-                <h2 id="dsa">DeepSeek Sparse Attention <span>(DSA)</span></h2>
-                <p>DeepSeek-V3.2 is the first model in this sequence to make the <em>read pattern</em> sparse. MLA already reduces the size of each cached entry. DSA decides that a query should read only a small number of those entries. It retains the MLA cache and adds a separate, inexpensive lightning indexer that ranks past tokens before main attention runs. <a href="#v32-source">[V3.2]</a></p>
-                <h3>What DSA changes</h3>
-                <p>Without DSA, a token’s main attention queries every earlier MLA latent in the context. With DSA, the indexer first gives each earlier token a relevance score. Main attention receives the Top-K highest-scoring MLA entries, not the whole context. The selected entries are still processed by the normal attention calculation. The indexer chooses where to read, while main attention decides how much each chosen entry contributes.</p>
-                <div class="attention-pipeline"><div><b>MLA cache</b><span>one latent per past token</span></div><i>→</i><div class="select-node"><b>lightning indexer</b><span>scores all past tokens</span></div><i>→</i><div class="compress-node"><b>Top-K tokens</b><span>2,048 in sparse training</span></div><i>→</i><div><b>MLA attention</b><span>reads selected latents</span></div></div>
-                <p class="math-label">LIGHTNING INDEXER</p>
-                <div class="equation compact-equation">I<sub>t,s</sub> = Σ<sub>j</sub> w<sub>t,j</sub><sup>I</sup> · ReLU(q<sub>t,j</sub><sup>I</sup> · k<sub>s</sub><sup>I</sup>)<br/>S<sub>t</sub> = TopK(I<sub>t,: </sub>), &nbsp; u<sub>t</sub> = Attention(h<sub>t</sub>, {c<sub>s</sub> | s ∈ S<sub>t</sub>})</div>
-                <p>For query position <em>t</em> and earlier position <em>s</em>, the indexer adds scores from a few small heads. The ReLU removes negative matches. The learned weight lets the current token favour useful indexer heads. This score is not an attention weight and it does not mix values. It is a cheap retrieval score. After selection, normal MLA attention reads the chosen latent values. V3.2 uses MLA in an MQA-like form at this point, so the selected KV latent is shared across query heads.</p>
-                <h3>How DSA learns not to hide useful evidence</h3>
-                <p>An untrained selector would discard useful tokens. V3.2 first runs dense attention, freezes the main model, and trains only the indexer to match the distribution of attention mass made by the existing dense heads:</p>
-                <div class="equation compact-equation">L<sub>index</sub> = Σ<sub>t</sub> D<sub>KL</sub>(p<sub>t,: </sub> || softmax(I<sub>t,: </sub>))</div>
-                <p>After 1,000 warm-up steps, Top-K selection is enabled and the full model trains on the sparse pattern. The indexer keeps its alignment loss, while the main model keeps the language-model loss. This makes the selector imitate useful dense reads before the model has to rely on it.</p>
-                <h3>What DSA saves, and what it still pays for</h3>
-                <p>Main attention now processes <em>k</em> values rather than the full length <em>L</em>, reducing that part of the work from O(<em>L</em><sup>2</sup>) to O(<em>Lk</em>). The lightning indexer still scores the full history, so DSA is not a fully linear method. It is valuable because scoring with small vectors is far cheaper than reading full main-attention representations. DSA selects individual token latents. The V4 methods below go a step further by compressing neighbouring tokens into blocks before retrieval.</p>
+                <h2 id="sparse">Sparse attention</h2>
+                <p>Sparse attention is the general idea of not giving every query a full, expensive read of the past. A model first identifies a small candidate set, then uses normal attention on only those candidates. The candidates can be individual tokens, as in DSA, or learned blocks of tokens, as in CSA. This section introduces the principle before the specific DeepSeek designs that apply it.</p>
 
-                <h2 id="sparse">Sparse attention: do not read every past position</h2>
-                <p>Dense attention compares a query with every cached key. Its cost grows with context length because every new token must score and read the entire history. Sparse attention changes the read pattern. A cheaper indexer identifies a small number of candidate blocks, then the normal, more expensive attention calculation runs only on those blocks.</p>
-                <div class="callout"><strong>A useful classification.</strong> CSA and HCA are attention mechanisms because they define the keys, values, and positions that a query reads. CSA2 is also an attention mechanism, but it adds an execution schedule: some layers create an index while others reuse one. KV-cache quantization is separate. It changes storage precision, not what is attended to.</div>
-                <p>The trade-off is directness. Dense attention can compare every token with every earlier token. Sparse attention reads only selected memory entries, so its indexer must retain the blocks that matter. Long-context systems often keep a local window of recent, uncompressed tokens because nearby syntax, the latest instruction, and recent tool output are unusually important.</p>
+                <h2 id="dsa">DeepSeek Sparse Attention <span>(DSA)</span></h2>
+                <p>DeepSeek-V3.2 is the first model in this sequence to make the <em>read pattern</em> sparse. MLA
+                    already reduces the size of each cached entry. DSA decides that a query should read only a small
+                    number of those entries. It retains the MLA cache and adds a separate, inexpensive lightning indexer
+                    that ranks past tokens before main attention runs. <a href="#v32-source">[V3.2]</a></p>
+                <h3>What DSA changes</h3>
+                <p>Without DSA, a token’s main attention queries every earlier MLA latent in the context. With DSA, the
+                    indexer first gives each earlier token a relevance score. Main attention receives the Top-K
+                    highest-scoring MLA entries, not the whole context. The selected entries are still processed by the
+                    normal attention calculation. The indexer chooses where to read, while main attention decides how
+                    much each chosen entry contributes.</p>
+                <div class="attention-pipeline">
+                    <div><b>MLA cache</b><span>one latent per past token</span></div>
+                    <i>→</i>
+                    <div class="select-node"><b>lightning indexer</b><span>scores all past tokens</span></div>
+                    <i>→</i>
+                    <div class="compress-node"><b>Top-K tokens</b><span>2,048 in sparse training</span></div>
+                    <i>→</i>
+                    <div><b>MLA attention</b><span>reads selected latents</span></div>
+                </div>
+                <p class="math-label">LIGHTNING INDEXER</p>
+                <div class="equation compact-equation">I<sub>t,s</sub> = Σ<sub>j</sub> w<sub>t,j</sub><sup>I</sup> ·
+                    ReLU(q<sub>t,j</sub><sup>I</sup> · k<sub>s</sub><sup>I</sup>)<br/>S<sub>t</sub> =
+                    TopK(I<sub>t,: </sub>), &nbsp; u<sub>t</sub> = Attention(h<sub>t</sub>, {c<sub>s</sub> | s ∈
+                    S<sub>t</sub>})
+                </div>
+                <p>For query position <em>t</em> and earlier position <em>s</em>, the indexer adds scores from a few
+                    small heads. The ReLU removes negative matches. The learned weight lets the current token favour
+                    useful indexer heads. This score is not an attention weight and it does not mix values. It is a
+                    cheap retrieval score. After selection, normal MLA attention reads the chosen latent values. V3.2
+                    uses MLA in an MQA-like form at this point, so the selected KV latent is shared across query heads.
+                </p>
+                <h3>How DSA learns not to hide useful evidence</h3>
+                <p>An untrained selector would discard useful tokens. V3.2 first runs dense attention, freezes the main
+                    model, and trains only the indexer to match the distribution of attention mass made by the existing
+                    dense heads:</p>
+                <div class="equation compact-equation">L<sub>index</sub> = Σ<sub>t</sub> D<sub>KL</sub>(p<sub>t,: </sub>
+                    || softmax(I<sub>t,: </sub>))
+                </div>
+                <p>After 1,000 warm-up steps, Top-K selection is enabled and the full model trains on the sparse
+                    pattern. The indexer keeps its alignment loss, while the main model keeps the language-model loss.
+                    This makes the selector imitate useful dense reads before the model has to rely on it.</p>
+                <p class="code-label">PYTORCH REFERENCE · DSA TOKEN SELECTION</p>
+                <pre><code>q = self.q(x).view(B, T, heads, head_width)
+k, v = self.kv(x).chunk(2, dim=-1)  # one shared KV set
+iq = self.index_q(x).view(B, T, index_heads, head_width)
+ik = self.index_k(x).view(B, T, index_heads, head_width)
+score = (torch.einsum("btjd,bsjd-&gt;btsj", iq, ik).relu()
+         * self.index_weight).sum(-1)
+score = score.masked_fill(future_mask, float("-inf"))
+indices = score.topk(top_k, dim=-1).indices
+output = attend_selected(q, k, v, indices)</code></pre>
+                <p>The complete runnable reference also handles causal validity for early tokens. It is available as <a href="reference_attention.py">reference_attention.py</a>.</p>
+                <h3>What DSA saves, and what it still pays for</h3>
+                <p>Main attention now processes <em>k</em> values rather than the full length <em>L</em>, reducing that
+                    part of the work from O(<em>L</em><sup>2</sup>) to O(<em>Lk</em>). The lightning indexer still
+                    scores the full history, so DSA is not a fully linear method. It is valuable because scoring with
+                    small vectors is far cheaper than reading full main-attention representations. DSA selects
+                    individual token latents. The V4 methods below go a step further by compressing neighbouring tokens
+                    into blocks before retrieval.</p>
+
+                <h2 id="sparse-details">Sparse attention: important implementation trade-offs</h2>
+                <p>Dense attention compares a query with every cached key. Its cost grows with context length because
+                    every new token must score and read the entire history. Sparse attention changes the read pattern. A
+                    cheaper indexer identifies a small number of candidate blocks, then the normal, more expensive
+                    attention calculation runs only on those blocks.</p>
+                <div class="callout"><strong>A useful classification.</strong> CSA and HCA are attention mechanisms
+                    because they define the keys, values, and positions that a query reads. CSA2 is also an attention
+                    mechanism, but it adds an execution schedule: some layers create an index while others reuse one.
+                    KV-cache quantization is separate. It changes storage precision, not what is attended to.
+                </div>
+                <p>The trade-off is directness. Dense attention can compare every token with every earlier token. Sparse
+                    attention reads only selected memory entries, so its indexer must retain the blocks that matter.
+                    Long-context systems often keep a local window of recent, uncompressed tokens because nearby syntax,
+                    the latest instruction, and recent tool output are unusually important.</p>
 
                 <h2 id="csa">Compressed Sparse Attention <span>(CSA)</span></h2>
-                <p>CSA, introduced in DeepSeek-V4, has two stages. It first compresses neighbouring KV entries along the sequence, then uses a lightweight indexer to choose a Top-K subset of those compressed entries for core attention. The sparse search therefore runs over a shorter learned representation of history, rather than over individual token entries. <a href="#v4-source">[V4]</a></p>
+                <p>CSA, introduced in DeepSeek-V4, has two stages. It first compresses neighbouring KV entries along the
+                    sequence, then uses a lightweight indexer to choose a Top-K subset of those compressed entries for
+                    core attention. The sparse search therefore runs over a shorter learned representation of history,
+                    rather than over individual token entries. <a href="#v4-source">[V4]</a></p>
                 <h3>1. Compress a block into one memory entry</h3>
-                <p>Let <em>H</em> be a run of hidden states. CSA projects them into candidate keys and values, then combines each group of <em>m</em> adjacent positions into one compressed entry. The weights are learned from a second projection, so this is not fixed average pooling. The model can place more of a block’s information into its summary when that information is useful for later retrieval.</p>
-                <div class="equation compact-equation">C = HW<sup>KV</sup>, &nbsp; Z = HW<sup>Z</sup><br/>K<sup>comp</sup><sub>r</sub> = Σ<sub>i=1</sub><sup>m</sup> softmax(Z<sub>r,i</sub>) C<sup>K</sup><sub>r,i</sub>, &nbsp; V<sup>comp</sup><sub>r</sub> = Σ<sub>i=1</sub><sup>m</sup> softmax(Z<sub>r,i</sub>) C<sup>V</sup><sub>r,i</sub></div>
-                <p>V4 forms overlapping compressed views so a boundary token is not forced into only one summary. This reduces the number of global entries by roughly the compression factor while retaining alternatives near block boundaries.</p>
-                <div class="attention-pipeline"><div><b>past tokens</b><span>full sequence</span></div><i>→</i><div class="compress-node"><b>learned compression</b><span>one entry per block</span></div><i>→</i><div class="select-node"><b>Top-K blocks</b><span>lightweight indexer</span></div><i>→</i><div><b>core attention</b><span>selected global memory</span></div></div>
+                <p>Let <em>H</em> be a run of hidden states. CSA projects them into candidate keys and values, then
+                    combines each group of <em>m</em> adjacent positions into one compressed entry. The weights are
+                    learned from a second projection, so this is not fixed average pooling. The model can place more of
+                    a block’s information into its summary when that information is useful for later retrieval.</p>
+                <div class="equation compact-equation">C = HW<sup>KV</sup>, &nbsp; Z =
+                    HW<sup>Z</sup><br/>K<sup>comp</sup><sub>r</sub> = Σ<sub>i=1</sub><sup>m</sup>
+                    softmax(Z<sub>r,i</sub>) C<sup>K</sup><sub>r,i</sub>, &nbsp; V<sup>comp</sup><sub>r</sub> = Σ<sub>i=1</sub><sup>m</sup>
+                    softmax(Z<sub>r,i</sub>) C<sup>V</sup><sub>r,i</sub></div>
+                <p>V4 forms overlapping compressed views so a boundary token is not forced into only one summary. This
+                    reduces the number of global entries by roughly the compression factor while retaining alternatives
+                    near block boundaries.</p>
+                <div class="attention-pipeline">
+                    <div><b>past tokens</b><span>full sequence</span></div>
+                    <i>→</i>
+                    <div class="compress-node"><b>learned compression</b><span>one entry per block</span></div>
+                    <i>→</i>
+                    <div class="select-node"><b>Top-K blocks</b><span>lightweight indexer</span></div>
+                    <i>→</i>
+                    <div><b>core attention</b><span>selected global memory</span></div>
+                </div>
                 <h3>2. Retrieve compressed blocks, then use real attention</h3>
-                <p>The CSA indexer scores compressed keys, selects the best blocks, and passes their compressed keys and values to main attention. The model does not expand a selected block back into its original tokens. It attends to the learned block representation. That is the central accuracy and efficiency trade-off.</p>
-                <div class="equation compact-equation">I<sub>t,r</sub> = index(q<sub>t</sub>, k<sup>comp</sup><sub>r</sub>), &nbsp; R<sub>t</sub> = TopK(I<sub>t,: </sub>)<br/>o<sub>t</sub> = Attention(q<sub>t</sub>, K<sup>comp</sup><sub>R<sub>t</sub></sub>, V<sup>comp</sup><sub>R<sub>t</sub></sub>)</div>
-                <p>CSA uses a shared KV representation for the sparse global path, much like MQA, while keeping many query heads. This makes each retrieved global entry economical to store and read. Partial RoPE preserves positional information in a subset of dimensions, and attention sinks give the model stable always-available positions.</p>
+                <p>The CSA indexer scores compressed keys, selects the best blocks, and passes their compressed keys and
+                    values to main attention. The model does not expand a selected block back into its original tokens.
+                    It attends to the learned block representation. That is the central accuracy and efficiency
+                    trade-off.</p>
+                <div class="equation compact-equation">I<sub>t,r</sub> = index(q<sub>t</sub>,
+                    k<sup>comp</sup><sub>r</sub>), &nbsp; R<sub>t</sub> = TopK(I<sub>t,: </sub>)<br/>o<sub>t</sub> =
+                    Attention(q<sub>t</sub>, K<sup>comp</sup><sub>R<sub>t</sub></sub>,
+                    V<sup>comp</sup><sub>R<sub>t</sub></sub>)
+                </div>
+                <p>CSA uses a shared KV representation for the sparse global path, much like MQA, while keeping many
+                    query heads. This makes each retrieved global entry economical to store and read. Partial RoPE
+                    preserves positional information in a subset of dimensions, and attention sinks give the model
+                    stable always-available positions.</p>
+                <p class="code-label">PYTORCH REFERENCE · LEARNED BLOCK COMPRESSION</p>
+                <pre><code>blocks = x.view(B, -1, block_size, x.size(-1))
+weights = self.pool_logits(blocks).squeeze(-1).softmax(dim=-1)
+k, v = self.kv(blocks).chunk(2, dim=-1)
+compressed_k = (weights[..., None] * k).sum(2)
+compressed_v = (weights[..., None] * v).sum(2)
+indices = index_scores.topk(top_k, dim=-1).indices
+global_output = attend_selected(q, compressed_k, compressed_v, indices)</code></pre>
                 <h3>3. Keep a precise local window</h3>
-                <p>CSA adds uncompressed sliding-window attention alongside the sparse global path. The local window can still resolve immediate relationships at token resolution, such as a closing delimiter, a function argument, or the last tool result. The global path provides broad retrieval. The local path protects short-range precision that aggressive compression can lose.</p>
+                <p>CSA adds uncompressed sliding-window attention alongside the sparse global path. The local window can
+                    still resolve immediate relationships at token resolution, such as a closing delimiter, a function
+                    argument, or the last tool result. The global path provides broad retrieval. The local path protects
+                    short-range precision that aggressive compression can lose.</p>
 
                 <h2 id="hca">Heavily Compressed Attention <span>(HCA)</span></h2>
-                <p>HCA uses the same idea of learned sequence compression, but pushes it much harder. Its blocks are far larger than CSA’s blocks, and it does not run Top-K retrieval after compression. Instead, attention reads every entry in the now very short compressed sequence. <a href="#v4-source">[V4]</a></p>
-                <p>This makes HCA useful as a global, low-resolution memory channel. It has no sparse-indexer miss risk because every compressed block is visible. It has a larger information-loss risk because each block represents many more original tokens. V4 interleaves HCA with CSA and local sliding-window attention, giving different layers different views of the same long prompt.</p>
-                <div class="compare-wrap"><table><thead><tr><th>Mechanism</th><th>Global entries read</th><th>What it trades away</th></tr></thead><tbody><tr><td><strong>DSA</strong></td><td>Top-K individual MLA latents</td><td>full main-attention reads</td></tr><tr><td><strong>CSA</strong></td><td>Top-K learned blocks, plus local tokens</td><td>token detail in global memory</td></tr><tr><td><strong>HCA</strong></td><td>all heavily compressed blocks</td><td>fine global detail</td></tr></tbody></table></div>
+                <p>HCA uses the same idea of learned sequence compression, but pushes it much harder. Its blocks are far
+                    larger than CSA’s blocks, and it does not run Top-K retrieval after compression. Instead, attention
+                    reads every entry in the now very short compressed sequence. <a href="#v4-source">[V4]</a></p>
+                <p>This makes HCA useful as a global, low-resolution memory channel. It has no sparse-indexer miss risk
+                    because every compressed block is visible. It has a larger information-loss risk because each block
+                    represents many more original tokens. V4 interleaves HCA with CSA and local sliding-window
+                    attention, giving different layers different views of the same long prompt.</p>
+                <p class="code-label">PYTORCH REFERENCE · HCA DENSE READ OF COMPRESSED BLOCKS</p>
+                <pre><code>keys, values, _ = self.compress(x)  # use a much larger block_size
+scores = torch.einsum("bthd,brd-&gt;bthr", q, keys) * head_width ** -0.5
+scores = scores.masked_fill(block_end_after_query, float("-inf"))
+output = torch.einsum("bthr,brd-&gt;bthd", scores.softmax(-1), values)</code></pre>
+                <div class="compare-wrap">
+                    <table>
+                        <thead>
+                        <tr>
+                            <th>Mechanism</th>
+                            <th>Global entries read</th>
+                            <th>What it trades away</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        <tr>
+                            <td><strong>DSA</strong></td>
+                            <td>Top-K individual MLA latents</td>
+                            <td>full main-attention reads</td>
+                        </tr>
+                        <tr>
+                            <td><strong>CSA</strong></td>
+                            <td>Top-K learned blocks, plus local tokens</td>
+                            <td>token detail in global memory</td>
+                        </tr>
+                        <tr>
+                            <td><strong>HCA</strong></td>
+                            <td>all heavily compressed blocks</td>
+                            <td>fine global detail</td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
 
                 <h2 id="csa2">Compressed Sparse Attention 2 <span>(CSA2)</span></h2>
-                <p>CSA2 in DeepSeek-V4.1-Flash retains sparse, compressed global attention but focuses on work repeated across layers. In a normal stack, every layer would create KV entries, run its indexer, and select Top-K blocks. CSA2 lets some layers reuse earlier work when a new selection is unlikely to justify the memory traffic and indexer computation. <a href="#v41-source">[V4.1]</a></p>
-                <div class="csa2-modes"><div><b>Full mode</b><span>creates main KV, indexer K and Q, then fresh Top-K indices</span></div><div><b>Reindex mode</b><span>reuses main KV and indexer K, computes its own indexer Q and fresh Top-K indices</span></div><div><b>Reuse mode</b><span>reuses main KV and Top-K indices, skipping indexer work</span></div></div>
-                <p>All three modes still run the layer’s attention and feed-forward computation. What changes is the retrieval preparation. Full mode is the reference point. Reindex mode asks a new query what to retrieve from the same compressed memory. Reuse mode assumes the preceding layer’s retrieval set is good enough and reads that set directly.</p>
+                <p>CSA2 in DeepSeek-V4.1-Flash retains sparse, compressed global attention but focuses on work repeated
+                    across layers. In a normal stack, every layer would create KV entries, run its indexer, and select
+                    Top-K blocks. CSA2 lets some layers reuse earlier work when a new selection is unlikely to justify
+                    the memory traffic and indexer computation. <a href="#v41-source">[V4.1]</a></p>
+                <div class="csa2-modes">
+                    <div><b>Full mode</b><span>creates main KV, indexer K and Q, then fresh Top-K indices</span></div>
+                    <div><b>Reindex mode</b><span>reuses main KV and indexer K, computes its own indexer Q and fresh Top-K indices</span>
+                    </div>
+                    <div><b>Reuse mode</b><span>reuses main KV and Top-K indices, skipping indexer work</span></div>
+                </div>
+                <p>All three modes still run the layer’s attention and feed-forward computation. What changes is the
+                    retrieval preparation. Full mode is the reference point. Reindex mode asks a new query what to
+                    retrieve from the same compressed memory. Reuse mode assumes the preceding layer’s retrieval set is
+                    good enough and reads that set directly.</p>
+                <p class="code-label">PYTORCH REFERENCE · CSA2 PREPARATION MODES</p>
+                <pre><code>if mode == "full":
+    keys, values = self.compress(x)
+    indices = self.index(x, keys)
+elif mode == "reindex":
+    keys, values = previous.keys, previous.values
+    indices = self.index(x, keys)       # fresh query and Top-K
+elif mode == "reuse":
+    keys, values, indices = previous    # no new indexer work
+
+output = attend_selected(q, keys, values, indices)</code></pre>
                 <h3>Hierarchical indexing narrows later searches</h3>
-                <p>In the decoder, a later Full-mode layer can restrict its search to the candidate pool selected by an earlier Full-mode layer. This creates a hierarchy. An early layer performs a broad retrieval, and later layers spend their more precise retrieval budget inside that shortlist. The system retains the option to refresh indices at chosen layers rather than making every layer follow the same selection forever.</p>
+                <p>In the decoder, a later Full-mode layer can restrict its search to the candidate pool selected by an
+                    earlier Full-mode layer. This creates a hierarchy. An early layer performs a broad retrieval, and
+                    later layers spend their more precise retrieval budget inside that shortlist. The system retains the
+                    option to refresh indices at chosen layers rather than making every layer follow the same selection
+                    forever.</p>
                 <h3>FP4 cache storage is related, but distinct</h3>
-                <p>V4.1-Flash also stores main KV in FP4 with quantization-aware training. That halves the bytes used by those cache entries compared with an 8-bit representation. It complements CSA2, but it is not CSA2. CSA2 reduces which retrieval computations are performed. FP4 reduces the storage and bandwidth cost of the entries that still exist.</p>
+                <p>V4.1-Flash also stores main KV in FP4 with quantization-aware training. That halves the bytes used by
+                    those cache entries compared with an 8-bit representation. It complements CSA2, but it is not CSA2.
+                    CSA2 reduces which retrieval computations are performed. FP4 reduces the storage and bandwidth cost
+                    of the entries that still exist.</p>
 
                 <h2 id="compare">Choosing an attention design</h2>
                 <div class="compare-wrap">
@@ -379,9 +545,12 @@ class MultiHeadLatentAttention(nn.Module):
                     Is All You Need</a> · <a href="https://arxiv.org/abs/1911.02150">Fast Transformer Decoding: One
                     Write-Head is All You Need</a> · <a href="https://arxiv.org/abs/2405.04434">DeepSeek-V2: A Strong,
                     Economical, and Efficient Mixture-of-Experts Language Model</a> · <a id="v32-source"
-                        href="https://arxiv.org/html/2512.02556">DeepSeek-V3.2: DeepSeek Sparse Attention</a> · <a id="v4-source"
-                        href="https://arxiv.org/html/2606.19348">DeepSeek-V4: Hybrid Attention with CSA and HCA</a> · <a id="v41-source"
-                        href="https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash">DeepSeek-V4.1-Flash: CSA2</a> · <a
+                                                                                         href="https://arxiv.org/html/2512.02556">DeepSeek-V3.2:
+                    DeepSeek Sparse Attention</a> · <a id="v4-source"
+                                                       href="https://arxiv.org/html/2606.19348">DeepSeek-V4: Hybrid
+                    Attention with CSA and HCA</a> · <a id="v41-source"
+                                                        href="https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash">DeepSeek-V4.1-Flash:
+                    CSA2</a> · <a
                         href="../linear-attention-residuals/">Kimi Linear &amp; Attention Residuals: sequence and
                     depth</a></p>
             </div>
