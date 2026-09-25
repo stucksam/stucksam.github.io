@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta name="description"
+          content="A technical guide to Qwen language and vision-language architectures, from Qwen through Qwen3.8-Flash-Next.">
+    <title>Qwen architectures — stucksam</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap"
+          rel="stylesheet">
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="stylesheet" href="../../attention/article.css">
+    <link rel="stylesheet" href="../deepseek/deepseek.css">
+    <link rel="stylesheet" href="qwen.css">
+</head>
+<body>
+<header class="site-header article-header"><a class="wordmark" href="../../" aria-label="stucksam home"><span
+        class="mark">∿</span> stucksam</a><a class="back-link" href="../">← Language models</a></header>
+<main class="article deepseek-article qwen-article">
+    <article>
+        <header class="article-hero"><p class="eyebrow"><span></span> Architecture · field guide</p>
+            <p class="article-kicker">Make more sequence and more parameters affordable to use.</p>
+            <h1>Qwen<br><em>architectures</em></h1>
+            <p class="article-dek">A technical history of Qwen’s language and vision-language models, from a dense
+                decoder and visual connector to hybrid recurrent attention, sparse experts, and micro-block
+                retrieval.</p>
+            <div class="article-meta">
+                <span>35 min read</span><span>Updated Sep 2026</span><span>Primary sources linked</span></div>
+        </header>
+        <div class="article-layout">
+            <aside class="toc" aria-label="Table of contents"><p>ON THIS PAGE</p>
+                <a href="#thread">1. The golden thread</a><a href="#qwen">2. Qwen and Qwen-VL</a><a class="toc-sub"
+                                                                                                    href="#connector">Vision
+                    connector</a>
+                <a href="#qwen2">3. Qwen2 and Qwen2-VL</a><a class="toc-sub" href="#mrope">M-RoPE in detail</a>
+                <a href="#qwen25">4. Qwen2.5 and long context</a><a class="toc-sub" href="#vl25">Qwen2.5-VL</a>
+                <a href="#qwen3">5. Qwen3 and Qwen3-VL</a><a class="toc-sub" href="#qwen3moe">MoE and thinking</a>
+                <a href="#next">6. Qwen3-Next</a><a class="toc-sub" href="#delta">Gated DeltaNet</a>
+                <a href="#bridge">7. Qwen3.5 to 3.8</a><a href="#flash">8. Qwen3.8-Flash-Next</a><a class="toc-sub"
+                                                                                                    href="#qsa">QSA and
+                    Gated Residual</a>
+                <a href="#matrix">9. Technical matrix</a><a href="#sources">Sources</a></aside>
+            <div class="prose">
+                <p class="lead">Qwen’s architecture story is not a series of unrelated model names. It is a steady
+                    effort to make longer inputs, larger parameter pools, and visual information cheaper to process,
+                    without losing the direct retrieval that makes Transformers useful.</p>
+                <div class="source-note"><strong>Scope note</strong><span>This page covers general-purpose text LLMs and vision-language models. Audio, speech, image-generation, coding-only, mathematics-only, embedding, and guard-model branches are intentionally left for separate explainers.</span>
+                </div>
+
+                <h2 id="thread">1. The golden thread: spend compute where it changes the answer</h2>
+                <p>Every Qwen generation still predicts the next token. What changes is the cost of deciding which
+                    earlier information to use and which parameters should process the current token. The early models
+                    are dense decoders. Qwen2 reduces decoding traffic with grouped-query attention. The vision branch
+                    learns to preserve an image’s real shape and a video’s timing. Later releases add sparse experts,
+                    hybrid sequence operators, and retrieval over compact memory blocks.</p>
+                <div class="roadmap">
+                    <div><b>2023</b><strong>Qwen</strong><span>dense decoder</span></div>
+                    <div><b>2023</b><strong>Qwen-VL</strong><span>visual connector</span></div>
+                    <div><b>2024</b><strong>Qwen2</strong><span>GQA and M-RoPE</span></div>
+                    <div><b>2025</b><strong>Qwen3</strong><span>MoE and hybrid thinking</span></div>
+                    <div><b>2025</b><strong>3-Next</strong><span>DeltaNet + attention</span></div>
+                    <div><b>2026</b><strong>Flash-Next</strong><span>QSA + n-grams</span></div>
+                </div>
+                <div class="bottleneck-grid">
+                    <div><b>KV-cache traffic</b><span>GQA shares keys and values across query heads.</span></div>
+                    <div><b>Visual geometry</b><span>Dynamic resolution and multi-axis position IDs retain shape and time.</span>
+                    </div>
+                    <div><b>Parameter cost</b><span>MoE activates a small set of expert feed-forward networks.</span>
+                    </div>
+                    <div><b>Long sequences</b><span>Hybrid recurrent attention and micro-block retrieval avoid a full global read in every layer.</span>
+                    </div>
+                </div>
+
+                <h2 id="qwen">2. Qwen and Qwen-VL: establish the decoder and connect vision</h2>
+                <p>The original Qwen family is a conventional dense, decoder-only Transformer. A token becomes a vector,
+                    passes through repeated attention and feed-forward layers, and produces a distribution for the next
+                    token. Attention allows a token to read earlier tokens. The feed-forward layer transforms each token
+                    independently after that read. Qwen’s value here is the baseline, because later Qwen releases change
+                    individual parts of this loop rather than discard it. <a href="#s1">[1]</a></p>
+                <p>Qwen1.5 is a bridge, not a new architecture chapter. Its 32B and 110B models use grouped-query
+                    attention, or GQA. Instead of storing a separate key and value for every query head, several query
+                    heads share one KV head. This reduces the cache stored during generation. Qwen2 later makes that
+                    choice standard across the family. <a href="#s3">[3]</a></p>
+                <h3 id="connector">2.1 Qwen-VL: turn image features into a sequence the decoder can read</h3>
+                <p>Qwen-VL adds a visual receptor before the language model. The receptor divides an image into patches
+                    and turns them into visual feature vectors. A connector maps those vectors into the language model’s
+                    embedding width. The decoder then receives visual tokens beside text tokens. This is a simple but
+                    important separation of roles: the vision stack finds visual patterns, while the LLM relates those
+                    patterns to the question and writes the answer.</p>
+                <div class="flow-diagram"><span>image<br><small>pixels</small></span><i>→</i><span class="yellow-node">visual receptor<br><small>patch features</small></span><i>→</i><span
+                        class="blue-node">connector<br><small>LLM-width tokens</small></span><i>→</i><span
+                        class="coral-node">Qwen decoder<br><small>text answer</small></span></div>
+                <p>The original VL training pipeline first aligns images and text, then exposes the system to a broader
+                    mix of visual-language tasks, and finally tunes conversational use. Grounding data also teaches the
+                    model to connect words with image regions. The architecture is still a separate vision encoder plus
+                    a language decoder, rather than one network that receives raw pixels throughout. <a
+                            href="#s2">[2]</a></p>
+
+                <h2 id="qwen2">3. Qwen2 and Qwen2-VL: make memory and visual position practical</h2>
+                <p>Qwen2 makes GQA a family-wide design choice. During autoregressive decoding, all past keys and values
+                    must be read again for every new token. If there are <em>H</em> query heads and <em>G</em> KV
+                    groups, each group serves <em>H/G</em> query heads. The cache therefore scales with <em>G</em>, not
+                    <em>H</em>.</p>
+                <div class="equation compact-equation">Q ∈ ℝ<sup>T×H×d</sup>, &nbsp; K,V ∈ ℝ<sup>T×G×d</sup>, &nbsp; G
+                    &lt; H<br><small>Several query heads read one shared key-value group.</small></div>
+                <p>This does not mean the query heads become identical. Each still forms its own query and attention
+                    weights. They simply read from a smaller set of cached key and value representations. Qwen2 also
+                    ships both dense models and a 57B-A14B MoE model. MoE therefore appears before Qwen3, even though
+                    Qwen3 makes it a more central family choice. <a href="#s4">[4]</a></p>
+                <h3 id="mrope">3.1 Qwen2-VL: position has time, height, and width</h3>
+                <p>Text has one natural position, its place in a sequence. Images and video have more: horizontal
+                    location, vertical location, and, for video, time. Qwen2-VL uses M-RoPE to assign separate position
+                    coordinates to those axes. The model can therefore distinguish a word in the top-left of a page from
+                    the same word in the bottom-right, and it can locate an event in a video rather than treating all
+                    frames as an unordered collection.</p>
+                <p>Naive Dynamic Resolution keeps an input image near its native aspect ratio and gives larger images
+                    more visual tokens. A 2×2 merger then combines nearby vision tokens before they reach the LLM. Video
+                    uses the same unified representation, with a shallow 3D convolution that groups small tubes across
+                    space and time. The point is not to preserve every pixel. It is to choose a token budget that tracks
+                    the information in the input. <a href="#s5">[5]</a></p>
+                <h3>3.2 M-RoPE in detail: rotate different parts of the vector along different axes</h3>
+                <p>Rotary position embeddings, or RoPE, do not add one position vector to a token. They rotate pairs of
+                    query and key dimensions by an angle determined by position. The dot product then depends on the
+                    distance between positions. Standard text RoPE uses one scalar position <em>p</em>. M-RoPE splits
+                    the positional dimensions into three bands and rotates each band using a different coordinate: time
+                    <em>t</em>, height <em>h</em>, and width <em>w</em>.</p>
+                <div class="attention-bands"><span
+                        class="local">time band<br><small>t, frame or text order</small></span><span class="global">height band<br><small>h, vertical image position</small></span><span
+                        class="compressed">width band<br><small>w, horizontal image position</small></span></div>
+                <div class="equation compact-equation">q′ = [RoPE(q<sup>t</sup>, t) ; RoPE(q<sup>h</sup>, h) ;
+                    RoPE(q<sup>w</sup>, w)]<br>k′ = [RoPE(k<sup>t</sup>, t) ; RoPE(k<sup>h</sup>, h) ;
+                    RoPE(k<sup>w</sup>, w)]
+                </div>
+                <p>For ordinary text tokens, Qwen2-VL assigns the same sequential position to all three coordinates.
+                    Text therefore behaves like normal one-dimensional RoPE. For an image patch, height and width come
+                    from its patch-grid location. For a video patch, time comes from its frame or temporal tube. This
+                    lets a language layer compare text with images and video without pretending that a two-dimensional
+                    page is a long row of unrelated patches.</p>
+                <p>M-RoPE gives the model coordinates, not visual understanding. The ViT still has to recognise strokes,
+                    objects, and motion. M-RoPE makes those features addressable in a way that preserves where and when
+                    they occurred. This matters for document questions such as “read the number in the bottom-right
+                    cell,” or video questions such as “what happened after the door opened?”</p>
+
+                <h2 id="qwen25">4. Qwen2.5 and long context: extend a mature decoder carefully</h2>
+                <p>Qwen2.5 mainly improves data, post-training, tool use, and structured output. Its base LLM is not a
+                    replacement for the Qwen2 Transformer. The architecture-relevant branch is Qwen2.5-1M, which adapts
+                    a Qwen2.5 checkpoint to very long prompts. It trains progressively to 256K tokens, raises the RoPE
+                    base frequency, and uses Dual Chunk Attention to preserve relative-position behaviour when
+                    extrapolating toward one million tokens. Sparse attention in the serving stack speeds the expensive
+                    prompt-prefill phase. These are long-context techniques around the decoder, not a new universal
+                    layer type. <a href="#s6">[6]</a></p>
+                <h3 id="vl25">4.1 Qwen2.5-VL: make the visual encoder cheaper without losing detail</h3>
+                <p>Qwen2.5-VL refines the vision side. It uses full attention in a small number of ViT layers and window
+                    attention in the others. Window attention lets a patch attend only within a nearby region, so the
+                    expensive global comparison is not repeated in every vision layer. RMSNorm and SwiGLU make the
+                    visual blocks resemble efficient LLM blocks. The model also uses image coordinates, dynamic frame
+                    rates, and absolute-time M-RoPE IDs, which makes spatial and temporal references less ambiguous. <a
+                            href="#s7">[7]</a></p>
+
+                <h2 id="qwen3">5. Qwen3 and Qwen3-VL: sparse parameters and a controllable reasoning policy</h2>
+                <p>Qwen3 keeps the efficient dense recipe of GQA, RoPE, SwiGLU, and pre-normalisation with RMSNorm. It
+                    removes QKV bias and adds QK-Norm, which normalises queries and keys before their dot product. That
+                    keeps attention scores in a more stable range during large-scale training. The major choice is that
+                    Qwen3 is released in both dense and MoE forms. <a href="#s8">[8]</a></p>
+                <h3 id="qwen3moe">5.1 MoE: choose a few feed-forward networks for each token</h3>
+                <p>An MoE layer replaces one large feed-forward network with many experts. A router scores the experts
+                    for each token and sends the token to only the best few. Qwen3’s released MoE models have 128
+                    experts and select eight per token. That gives the model a large total parameter pool while keeping
+                    the per-token calculation much smaller than running every expert.</p>
+                <div class="moe-diagram"><span class="input-node">token state</span><i>→</i><span class="router-node">router<br><small>scores experts</small></span><i>→</i><span
+                        class="expert-box"><b>E₁</b><b>E₂</b><b>E₃</b><b>E₄</b><b>E₅</b><b>E₆</b></span><i>→</i><span
+                        class="output-node">weighted sum</span></div>
+                <div class="equation compact-equation">y = Σ<sub>i ∈ TopK(r(x))</sub> softmax(r(x))<sub>i</sub> · E<sub>i</sub>(x)
+                </div>
+                <p>The router needs balancing. If a few experts receive nearly all tokens, those experts become
+                    overloaded and the rest do not learn. Qwen3 uses global-batch load balancing, which measures routing
+                    across a wider batch rather than correcting every small local batch independently.</p>
+                <p>Qwen3’s thinking and non-thinking modes belong in a different box from this architecture. They are
+                    learned through a four-stage post-training process that includes a reasoning cold start,
+                    reinforcement learning, fusion with direct-answer data, and general RL. The same model weights can
+                    be prompted to show a reasoning trace or answer directly. This changes output behaviour and token
+                    budget, not the attention calculation. <a href="#s9">[9]</a></p>
+                <h3>5.2 Qwen3-VL: send visual features into more than one language layer</h3>
+                <p>Qwen3-VL keeps the vision encoder, merger, and Qwen3 decoder structure, but adds DeepStack. Instead
+                    of sending only the final vision-encoder features into the LLM, DeepStack injects features from
+                    several vision depths into corresponding language layers. Early visual layers can contribute local
+                    texture and text detail, while later layers contribute more abstract objects and relations.
+                    Interleaved M-RoPE and text timestamps extend the position scheme to long mixed image, video, and
+                    text histories. <a href="#s10">[10]</a></p>
+
+                <h2 id="next">6. Qwen3-Next: use recurrence for most layers, attention at intervals</h2>
+                <p>Qwen3-Next is the first large change to the sequence operator. The 80B-A3B model has 80B total
+                    parameters and activates about 3B per token. Its 48 layers are twelve repetitions of three Gated
+                    DeltaNet-plus-MoE layers followed by one Gated Attention-plus-MoE layer. In other words, 75% of
+                    token-mixing layers carry a fixed-size recurrent memory forward, while 25% still perform direct
+                    content-based lookup over the context. <a href="#s17">[17]</a></p>
+                <figure class="qwen-author-figure"><img
+                        src="https://qianwen-res.oss-accelerate.aliyuncs.com/Qwen3-Next/model_architecture.png"
+                        alt="Author diagram of the Qwen3-Next hybrid architecture, with repeating Gated DeltaNet and Gated Attention layers">
+                    <figcaption>Qwen’s author-provided Qwen3-Next architecture diagram. Three Gated DeltaNet layers are
+                        followed by one Gated Attention layer, with MoE feed-forward computation in each block. <a
+                                href="#s17">Source</a></figcaption>
+                </figure>
+                <p>This is not a claim that recurrence is universally better than attention. The design assigns them
+                    different jobs. DeltaNet keeps processing cheap as the history grows, because its state does not
+                    grow with the number of earlier tokens. Gated Attention remains at regular intervals because it can
+                    retrieve one particular earlier token or passage directly. The official ablations compare the 75/25
+                    hybrid with pure paths, rather than treating the hybrid as an arbitrary mixture.</p>
+                <h3 id="delta">6.1 Gated DeltaNet: update a memory state instead of storing every pairwise
+                    comparison</h3>
+                <p>In full attention, each token compares its query with many earlier keys. A DeltaNet layer instead
+                    maintains a state matrix <em>S</em>. A new token writes a key-value association into that state,
+                    while a learned gate decides how much old state to retain. The query reads from the updated state.
+                    This is linear in sequence length for a fixed state size, but it cannot keep every past token as an
+                    independently addressable entry.</p>
+                <div class="equation compact-equation">S̃<sub>t−1</sub> = α<sub>t</sub>S<sub>t−1</sub><br>e<sub>t</sub>
+                    = v<sub>t</sub> − S̃<sub>t−1</sub><sup>T</sup>k<sub>t</sub><br>S<sub>t</sub> = S̃<sub>t−1</sub> +
+                    β<sub>t</sub>k<sub>t</sub>e<sub>t</sub><sup>T</sup>, &nbsp; o<sub>t</sub> =
+                    S<sub>t</sub><sup>T</sup>q<sub>t</sub>
+                </div>
+                <p>Here α decides how quickly old state fades and β controls the new write. The layer writes only the
+                    error between the current value and the value already recalled through the current key. Similar keys
+                    therefore revise an association instead of simply accumulating more outer products. Qwen’s
+                    configuration uses 16 query/key heads, 32 value heads, 128 dimensions per head, and a short causal
+                    convolution with kernel size 4 before the recurrent update. These details give the state a small
+                    local view before it has to compress the past. <a href="#s18">[18]</a></p>
+                <h3>6.2 Gated Attention: retain a smaller number of exact global reads</h3>
+                <p>The fourth layer in each group is still causal softmax attention. It uses an output gate, a
+                    256-dimensional head, and RoPE on the first 64 dimensions of each head. The output gate can suppress
+                    an attention read when it is not useful. Qwen motivates this as a guard against low-rank behaviour,
+                    attention sinks, and large activations. The model has 16 query heads and 2 KV heads in these layers,
+                    so GQA limits cache traffic while the query heads remain diverse.</p>
+                <h3>6.3 Sparse experts and multi-token prediction complete the efficiency design</h3>
+                <p>Every token-mixing block is followed by an MoE feed-forward layer with 512 routed experts. The router
+                    selects ten routed experts and one shared expert for each token. Compared with Qwen3’s 128 experts
+                    and top-8 routing, this makes the parameter pool much larger while keeping only a small slice
+                    active. The release also normalises router initialisation and uses zero-centred RMSNorm with weight
+                    decay on norm weights to make the sparse, hybrid stack easier to train stably.</p>
+                <p>Qwen3-Next includes native multi-token prediction. Its auxiliary prediction path is trained for
+                    several draft steps, so its training task matches the speculative-decoding use at inference more
+                    closely than a one-step-only draft model. The public material supports that role, but does not
+                    establish a separate MTP layer count, so this guide does not infer one. The model is pretrained on
+                    15T tokens sampled from the Qwen3 corpus, has a native 262K context window, and can be extended with
+                    YaRN toward roughly one million tokens. <a href="#s17">[17]</a> <a href="#s18">[18]</a></p>
+
+                <h2 id="bridge">7. Qwen3.5, 3.6, 3.7, and 3.8: retain the hybrid template</h2>
+                <p>The later point releases should not be presented as four different Transformers. Qwen3.5 brings the
+                    Qwen3-Next hybrid of three Gated DeltaNet layers and one Gated Attention layer into a unified
+                    vision-language foundation. It retains sparse MoE, MTP, and a native 262K context that can extend
+                    toward one million tokens. <a href="#s12">[12]</a></p>
+                <p>Qwen3.6 retains that core layout. Its public release emphasises post-training and agent ergonomics,
+                    including keeping relevant reasoning history through tool use, rather than a new sequence block.
+                    Qwen3.7 is a hosted-product waypoint in the current public record, so this guide does not invent an
+                    architecture claim for it. Qwen3.8 scales the same template to 2.4T total parameters with 95B active
+                    parameters. The useful conclusion is that scale and training changed, while the published hybrid
+                    backbone remained recognisable. <a href="#s13">[13]</a> <a href="#s14">[14]</a></p>
+
+                <h2 id="flash">8. Qwen3.8-Flash-Next: retrieve useful micro-blocks and add static n-gram memory</h2>
+                <p>Qwen3.8-Flash-Next is the next clear architecture break. It is a multimodal MoE model and an early
+                    preview of the architecture intended for Qwen4. The official repository names four coupled changes:
+                    Gated DeltaNet plus Qwen Sparse Attention for token mixing, a four-branch Gated Residual stream, an
+                    offloaded n-gram embedding table, and an optimisation recipe built around Muon. The technical report
+                    matters because it records the ablations behind these choices, rather than only listing model
+                    features. <a href="#s15">[15]</a> <a href="#s16">[16]</a></p>
+                <div class="flow-diagram"><span>token stream<br><small>Gated DeltaNet</small></span><i>→</i><span
+                        class="yellow-node">QSA indexer<br><small>ranks micro-blocks</small></span><i>→</i><span
+                        class="blue-node">Top-K blocks<br><small>small candidate set</small></span><i>→</i><span
+                        class="coral-node">sparse read<br><small>precise evidence</small></span></div>
+                <figure class="source-note"><strong>Author figure</strong><span>The paper’s <a
+                        href="https://arxiv.org/html/2608.30320#S1.F1">Figure 1</a> shows the complete stack: three GDN layers followed by one QSA layer, Gated Residual reads and writes around every sublayer, an n-gram embedding at layer 2, and multi-token prediction at the output. The original remains linked rather than copied, so it stays with the authors’ current version.</span>
+                </figure>
+                <h3 id="qsa">8.1 QSA: sparse attention whose indexer also scales with context length</h3>
+                <p>Token-level sparse attention has a hidden cost. It may read only a few tokens in main attention, but
+                    its indexer still scores every query against every past token. QSA makes the indexer cheaper too. It
+                    splits past keys into non-overlapping micro-blocks of <em>r</em> tokens, averages each block into
+                    one index key, and scores those compressed keys. The indexer now makes about <em>n/r</em>
+                    comparisons per query rather than <em>n</em>.</p>
+                <div class="equation compact-equation">k̂<sub>b</sub> = RMSNorm(AvgPool(k<sub>br :
+                    br+r−1</sub>))<br>I<sub>i,b</sub> = Σ<sub>h</sub> ReLU(⟨RoPE(q<sub>i</sub><sup>h</sup>, i),
+                    RoPE(k̂<sub>b</sub>, br)⟩)<br>B<sub>i</sub> = TopK<sub>⌈K/r⌉</sub>(I<sub>i,: </sub>)
+                </div>
+                <p>The order of operations is deliberate. QSA averages content before applying RoPE, then gives the
+                    resulting block a single position. Averaging already rotated keys would mix incompatible rotary
+                    phases. The indexer uses MQA, many small query heads with one shared key head, and partial RoPE on
+                    only part of each head. These choices keep it much smaller than the main attention path.</p>
+                <p>A selected block is expanded back into its original token positions for the core attention
+                    calculation. QSA also includes the recent unfinished micro-block, so the model does not lose the
+                    latest tokens just because a block has not closed. A query can select only a block whose last token
+                    is already in its past. QSA is therefore block-level retrieval followed by token-level attention
+                    inside the selected blocks.</p>
+                <div class="source-note"><strong>Training QSA</strong><span>During continued pre-training, dense distillation first teaches the indexer to match the backbone’s dense attention distribution after it has been pooled into blocks. Sparse training then enables Top-K block selection and adapts the backbone to this sparse pattern. This prevents an untrained selector from hiding useful evidence.</span>
+                </div>
+                <p>QSA does not reuse indices from a previous layer as CSA2 does. It compresses within its own layer,
+                    which suits a hybrid model where three GDN layers separate sparse-attention layers. Its compressed
+                    indexer reduces its own prefill cost from O(<em>n</em><sup>2</sup>) to O(<em>n</em><sup>2</sup>/<em>r</em>).
+                    Multi-token prediction can reuse QSA’s Top-K indices across speculative draft steps, where
+                    recomputing a near-identical retrieval set would waste work. <a href="#s16">[16]</a></p>
+                <h3>8.2 Gated DeltaNet: targeted erase-and-write memory</h3>
+                <p>Gated DeltaNet holds a fixed-size state matrix. First, a decay gate weakens old state. The layer then
+                    asks what value is already associated with the current key, and writes only the difference between
+                    that prediction and the current value. Similar keys revise an existing association rather than
+                    endlessly adding another copy.</p>
+                <div class="equation compact-equation">S̃<sub>t−1</sub> = α<sub>t</sub>S<sub>t−1</sub><br>e<sub>t</sub>
+                    = v<sub>t</sub> − S̃<sub>t−1</sub><sup>T</sup>k<sub>t</sub><br>S<sub>t</sub> = S̃<sub>t−1</sub> +
+                    β<sub>t</sub>k<sub>t</sub>e<sub>t</sub><sup>T</sup>, &nbsp; y<sub>t</sub> =
+                    S<sub>t</sub><sup>T</sup>q<sub>t</sub></div>
+                <p>Here α controls how long state survives and β controls the corrective write. Qwen applies short
+                    causal convolutions to Q, K, and V before this recurrence, which gives the layer a small local
+                    neighbourhood before it compresses information into state. Queries and keys are L2-normalised to
+                    bound the update. Periodic QSA remains necessary because no fixed-size state can preserve every
+                    distinct past token for later lookup. <a href="#s16">[16]</a></p>
+                <h3>8.3 Gated Residual: four persistent streams with learned reads and writes</h3>
+                <p>A standard Transformer has one residual stream. Flash-Next keeps four. Before a sublayer runs, each
+                    branch is independently RMS-normalised. A small gating network looks at all branches and assigns a
+                    separate gate to every branch and channel. The sublayer receives the average of those gated
+                    values.</p>
+                <div class="equation compact-equation">x = ¼ Σ<sub>c=1</sub><sup>4</sup> G<sub>c</sub> ⊙
+                    RMSNorm(R<sub>c</sub>)<br>R′<sub>c</sub> = R<sub>c</sub> + s<sub>c</sub> · F(x)
+                </div>
+                <p>The sublayer output is written back to every branch with a learned scalar strength <em>s</em>. The
+                    extra width is therefore usable, not merely duplicated. In the authors’ analysis, one branch tends
+                    to carry information across many layers while the other three retain more local updates. The gates
+                    also supply explicit rescaling, reducing activation outliers and improving stability at aggressive
+                    learning rates. The design removes a separate branch-mixing read that would add memory traffic
+                    during decoding. <a href="#s16">[16]</a></p>
+                <h3>8.4 N-gram embedding: static capacity for familiar local patterns</h3>
+                <p>The n-gram layer looks up embeddings for recent 2-, 3-, and 4-token sequences. It appears once, at
+                    layer 2, rather than in every layer. Its tables live in host memory and are prefetched
+                    asynchronously, so transfer overlaps with accelerator computation. This adds a large static lookup
+                    table without making every Transformer matrix larger.</p>
+                <p>The division of labour matters. The n-gram table helps with frequent local patterns, names, and code
+                    fragments. GDN carries an evolving compressed history. QSA retrieves detailed evidence from a long
+                    prompt. The n-gram table does not reason over a document and does not replace normal token
+                    embeddings.</p>
+                <h3>8.5 The system, rather than one headline number</h3>
+                <p>The published model has a 125B main model with 6B main-model parameters active per token and 51B
+                    n-gram embedding parameters held off accelerator. The paper compares it with the 397B-A17B
+                    predecessor at roughly one third of active parameters and training tokens, and about one ninth of
+                    training FLOPs. These are system-level results, not proof that a single module alone created the
+                    gain. The report’s useful lesson is that token mixing, residual scaling, memory placement, and
+                    optimisation have to be evaluated together. <a href="#s15">[15]</a> <a href="#s16">[16]</a></p>
+
+                <h2 id="matrix">9. Comparative technical matrix</h2>
+                <div class="compare-wrap matrix">
+                    <table>
+                        <thead>
+                        <tr>
+                            <th>FAMILY</th>
+                            <th>TEXT BACKBONE</th>
+                            <th>VISION CHANGE</th>
+                            <th>MAIN ADVANCEMENT</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        <tr>
+                            <td><strong>Qwen / VL</strong><br><small>2023</small></td>
+                            <td>dense decoder</td>
+                            <td>visual receptor + connector</td>
+                            <td>establish text and image-token baseline</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Qwen2 / VL</strong><br><small>2024</small></td>
+                            <td>GQA, dense and early MoE</td>
+                            <td>dynamic resolution, M-RoPE</td>
+                            <td>cheap KV reads and native visual geometry</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Qwen2.5 / VL</strong><br><small>2024–25</small></td>
+                            <td>Qwen2 continuation, 1M techniques</td>
+                            <td>hybrid full/window ViT attention</td>
+                            <td>long context and cheaper vision encoding</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Qwen3 / VL</strong><br><small>2025</small></td>
+                            <td>dense or 128-expert MoE, GQA, QK-Norm</td>
+                            <td>DeepStack, interleaved M-RoPE</td>
+                            <td>MoE as a family choice and richer multimodal fusion</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Qwen3-Next</strong><br><small>2025</small></td>
+                            <td>3× Gated DeltaNet, 1× Gated Attention, sparse MoE</td>
+                            <td>text model</td>
+                            <td>hybrid recurrent and retrieval sequence processing</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Qwen3.5–3.8</strong><br><small>2026</small></td>
+                            <td>same hybrid template, larger MoE</td>
+                            <td>unified VL in 3.5</td>
+                            <td>scale, long context, agent training</td>
+                        </tr>
+                        <tr>
+                            <td><strong>3.8-Flash-Next</strong><br><small>2026</small></td>
+                            <td>Gated DeltaNet + QSA, sparse MoE, n-grams</td>
+                            <td>multimodal model card</td>
+                            <td>micro-block sparse retrieval and static pattern memory</td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="callout"><strong>How to read the lineage.</strong> GQA changes how much cached attention
+                    state is stored. M-RoPE changes how visual position is represented. MoE changes which feed-forward
+                    weights a token activates. DeltaNet changes the default way history is carried forward. QSA changes
+                    how the model retrieves detailed evidence from a long history. Keeping these questions separate
+                    prevents “efficient” from becoming an empty label.
+                </div>
+                <hr>
+                <section class="sources" id="sources"><strong>Primary sources</strong>
+                    <ol>
+                        <li id="s1"><a href="https://arxiv.org/abs/2309.16609">Qwen Technical Report</a> (2023).</li>
+                        <li id="s2"><a href="https://arxiv.org/abs/2308.12966">Qwen-VL: A Versatile Vision-Language
+                            Model</a> (2023).
+                        </li>
+                        <li id="s3"><a href="https://qwenlm.github.io/blog/qwen1.5-32b/">Qwen1.5-32B release</a> (2024).
+                        </li>
+                        <li id="s4"><a href="https://arxiv.org/abs/2407.10671">Qwen2 Technical Report</a> (2024).</li>
+                        <li id="s5"><a href="https://arxiv.org/abs/2409.12191">Qwen2-VL Technical Report</a> (2024).
+                        </li>
+                        <li id="s6"><a href="https://qwenlm.github.io/blog/qwen2.5-1m/">Qwen2.5-1M release</a> (2025).
+                        </li>
+                        <li id="s7"><a href="https://arxiv.org/abs/2502.13923">Qwen2.5-VL Technical Report</a> (2025).
+                        </li>
+                        <li id="s8"><a href="https://arxiv.org/abs/2505.09388">Qwen3 Technical Report</a> (2025).</li>
+                        <li id="s9"><a href="https://qwenlm.github.io/blog/qwen3/">Qwen3 release</a> (2025).</li>
+                        <li id="s10"><a href="https://arxiv.org/abs/2511.21631">Qwen3-VL Technical Report</a> (2025).
+                        </li>
+                        <li id="s11"><a href="https://huggingface.co/Qwen/Qwen3-Next-80B-A3B-Instruct">Qwen3-Next-80B-A3B
+                            model card</a> (2025).
+                        </li>
+                        <li id="s17"><a href="https://qwen.ai/blog?id=4074cca80393150c248e508aa62983f9cb7d27cd">Qwen3-Next
+                            official research blog</a> (Qwen, 2025).
+                        </li>
+                        <li id="s18"><a
+                                href="https://huggingface.co/Qwen/Qwen3-Next-80B-A3B-Instruct/raw/main/config.json">Qwen3-Next-80B-A3B
+                            official configuration</a> (2025).
+                        </li>
+                        <li id="s12"><a href="https://huggingface.co/Qwen/Qwen3.5-397B-A17B">Qwen3.5-397B-A17B model
+                            card</a> (2026).
+                        </li>
+                        <li id="s13"><a href="https://huggingface.co/Qwen/Qwen3.6-35B-A3B">Qwen3.6-35B-A3B model
+                            card</a> (2026).
+                        </li>
+                        <li id="s14"><a href="https://huggingface.co/Qwen/Qwen3.8-2.4T-A95B">Qwen3.8-2.4T-A95B model
+                            card</a> (2026).
+                        </li>
+                        <li id="s15"><a href="https://github.com/QwenLM/Qwen3.8-Flash-Next">Qwen3.8-Flash-Next official
+                            repository and technical report</a> (2026).
+                        </li>
+                        <li id="s16"><a href="https://arxiv.org/abs/2608.30320">On the Design of Qwen3.8-Next
+                            Architecture: Evaluation, Efficiency, and Training Stability</a> (Qwen Team, 2026).
+                        </li>
+                    </ol>
+                </section>
+            </div>
+        </div>
+    </article>
+</main>
+<footer><a class="wordmark" href="../../"><span class="mark">∿</span> stucksam</a>
+    <p>Notes on learning machines, in public.</p><span>© 2026</span></footer>
+</body>
+</html>
