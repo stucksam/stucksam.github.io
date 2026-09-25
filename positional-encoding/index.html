@@ -22,13 +22,14 @@
         <header class="article-hero"><p class="eyebrow"><span></span> Foundations · explainer</p>
             <p class="article-kicker">How a sequence model learns that order exists.</p>
             <h1>Positional<br><em>encoding</em></h1>
-            <p class="article-dek">Absolute positions, relative biases, rotary embeddings, long-context extensions, and
-                the surprising return of no positional encoding.</p>
-            <div class="article-meta"><span>18 min read</span><span>Updated Jul 2026</span></div>
+            <p class="article-dek">Absolute positions, relative biases, rotary embeddings, multimodal coordinates,
+                long-context extensions, and the surprising return of no positional encoding.</p>
+            <div class="article-meta"><span>22 min read</span><span>Updated Sep 2026</span></div>
         </header>
         <div class="article-layout">
             <aside class="toc"><p>ON THIS PAGE</p><a href="#need">Why position?</a><a href="#absolute">Absolute
-                positions</a><a href="#relative">Relative methods</a><a href="#rope">RoPE</a><a href="#long">Long
+                positions</a><a href="#relative">Relative methods</a><a href="#rope">RoPE</a><a href="#mrope">M-RoPE</a><a
+                    href="#long">Long
                 context</a><a href="#nope">NoPE</a><a href="#choose">Decision guide</a></aside>
             <div class="prose">
                 <p class="lead">Attention compares content. Unless we add—or induce—an ordering signal, “dog bites man”
@@ -130,6 +131,62 @@ def apply_rope(q_or_k, base=10_000):
     return torch.stack((even*cos - odd*sin, even*sin + odd*cos), -1).flatten(-2)
 
 # Apply after Q/K projection; do not rotate V.</code></pre>
+                <h2 id="mrope">Multimodal RoPE <span>(M-RoPE)</span></h2>
+                <p>RoPE normally gives every query and key one position, its place in the text sequence. That is enough
+                    for prose, but an image patch has a row and column, and a video patch also has a time. M-RoPE keeps
+                    RoPE’s useful relative-position property while splitting the head dimensions into independent
+                    position bands for <strong>time</strong>, <strong>height</strong>, and <strong>width</strong>.</p>
+                <div class="axis-strip">
+                    <div><b>time</b><span>frame or text order</span></div>
+                    <div><b>height</b><span>row in an image grid</span></div>
+                    <div><b>width</b><span>column in an image grid</span></div>
+                </div>
+                <p>Each band is rotated with its own coordinate. A visual token at row 3 and column 8 therefore has a
+                    different positional pattern from one at row 8 and column 3, even when they occur beside each other
+                    in the flattened token sequence. For an image, the time coordinate is constant and height and width
+                    vary. For video, time advances per frame while height and width still identify the patch location.
+                    Text uses the same sequential ID for all three bands, so it behaves like ordinary one-dimensional
+                    RoPE. <a href="#qwen2vl-source">[Qwen2-VL]</a></p>
+                <p class="math-label">SPLIT-AXIS ROTATION</p>
+                <div class="equation compact-equation">q′ = [RoPE(q<sup>t</sup>, t) ; RoPE(q<sup>h</sup>, h) ;
+                    RoPE(q<sup>w</sup>, w)]<br>k′ = [RoPE(k<sup>t</sup>, t) ; RoPE(k<sup>h</sup>, h) ;
+                    RoPE(k<sup>w</sup>, w)]
+                </div>
+                <p>The semicolons here mean concatenation, not three attention operations. Attention still takes one dot
+                    product between the full rotated query and key. The split simply lets one part of that dot product
+                    reflect temporal distance, another vertical distance, and another horizontal distance. M-RoPE tells
+                    the decoder where a vision feature came from. It does not replace the vision encoder, which still
+                    has to recognise the feature in the first place.</p>
+                <p class="code-label">PYTORCH REFERENCE · APPLYING M-ROPE TO Q AND K</p>
+                <pre><code>import torch
+
+def rotate_half(x):
+    even, odd = x[..., 0::2], x[..., 1::2]
+    return torch.stack((-odd, even), dim=-1).flatten(-2)
+
+def rope_axis(x, positions, base=10_000):
+    # x: [batch, tokens, heads, axis_width], axis_width must be even.
+    axis_width = x.size(-1)
+    inv_freq = base ** (-torch.arange(0, axis_width, 2, device=x.device,
+                                      dtype=x.dtype) / axis_width)
+    angles = positions.to(x.dtype)[..., None] * inv_freq
+    angles = torch.repeat_interleave(angles, 2, dim=-1)[:, :, None, :]
+    return x * angles.cos() + rotate_half(x) * angles.sin()
+
+def apply_mrope(q, k, position_ids, axis_widths):
+    # q, k: [B, T, H, D]; position_ids: [B, T, 3] for (time, height, width).
+    # axis_widths must sum to D and every width must be even.
+    assert sum(axis_widths) == q.size(-1) and all(w % 2 == 0 for w in axis_widths)
+    q_parts, k_parts = q.split(axis_widths, dim=-1), k.split(axis_widths, dim=-1)
+    q_rotated = [rope_axis(part, position_ids[..., axis])
+                 for axis, part in enumerate(q_parts)]
+    k_rotated = [rope_axis(part, position_ids[..., axis])
+                 for axis, part in enumerate(k_parts)]
+    return torch.cat(q_rotated, dim=-1), torch.cat(k_rotated, dim=-1)
+
+# Text: give all axes the same sequential position.
+# Image: time is constant, height and width come from the patch grid.
+# Video: time advances by frame, height and width come from the patch grid.</code></pre>
                 <h2 id="long">RoPE beyond its training length</h2>
                 <p>At long context, RoPE angles move into patterns the model did not see during training. The family of
                     fixes changes the mapping from a token position t to a rotation angle.</p>
@@ -256,7 +313,9 @@ class NoPECausalAttention(nn.Module):
                     Is All You Need</a> · <a href="https://arxiv.org/abs/2104.09864">RoFormer / RoPE</a> · <a
                         href="https://arxiv.org/abs/2108.12409">ALiBi</a> · <a href="https://arxiv.org/abs/2306.15595">Position
                     Interpolation</a> · <a href="https://arxiv.org/abs/2309.00071">YaRN</a> · <a
-                        href="https://arxiv.org/abs/2402.13753">LongRoPE</a> · <a
+                        href="https://arxiv.org/abs/2402.13753">LongRoPE</a> · <a id="qwen2vl-source"
+                                                                                  href="https://arxiv.org/abs/2409.12191">Qwen2-VL
+                    / M-RoPE</a> · <a
                         href="https://arxiv.org/abs/2607.24653">Kimi K3 report</a></p>
             </div>
         </div>

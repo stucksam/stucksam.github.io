@@ -206,6 +206,39 @@
     font: .62rem "DM Mono", monospace;
 }
 
+.axis-strip {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 5px;
+    margin: 25px 0 28px;
+}
+
+.axis-strip div {
+    min-height: 76px;
+    padding: 13px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    background: var(--blue);
+}
+
+.axis-strip div:nth-child(2) {
+    background: var(--yellow);
+}
+
+.axis-strip div:nth-child(3) {
+    background: var(--coral);
+}
+
+.axis-strip b {
+    font: .74rem "DM Mono", monospace;
+}
+
+.axis-strip span {
+    font-size: .72rem;
+    line-height: 1.35;
+}
+
 @media (max-width: 530px) {
     .position-diagram {
         gap: 6px;
@@ -249,5 +282,9 @@
 
     .nope-diagram .token {
         min-width: 47px
+    }
+
+    .axis-strip {
+        grid-template-columns: 1fr;
     }
 }

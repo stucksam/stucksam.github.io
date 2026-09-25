@@ -18,7 +18,7 @@ def causal_mask(scores: Tensor, key_positions: Tensor) -> Tensor:
 def attend_selected(q: Tensor, k: Tensor, v: Tensor, indices: Tensor, valid: Tensor | None = None) -> Tensor:
     """Attention over per-query selected entries.
 
-    q is [batch, time, heads, width], k and v are [batch, entries, width],
+    q is [batch, time, heads, width], k and v are [batch, entries, width]
     and indices is [batch, time, selected].
     """
     batch, time, heads, width = q.shape
@@ -141,6 +141,66 @@ class HeavilyCompressedAttention(CompressedSparseAttention):
         return self.out(y.reshape(batch, time, dim))
 
 
+class QwenSparseAttention(nn.Module):
+    """QSA-style micro-block indexing followed by token-level sparse attention.
+
+    The lightweight indexer is MQA-like: many query heads share one compressed
+    key stream.  The core path below also shares KV for readability.  Production
+    QSA additionally uses its model-specific RoPE and fused sparse kernels.
+    """
+
+    def __init__(self, dim: int, heads: int = 4, index_heads: int = 2,
+                 block_size: int = 4, token_budget: int = 8):
+        super().__init__()
+        assert dim % heads == 0
+        self.heads, self.width = heads, dim // heads
+        self.block_size, self.token_budget = block_size, token_budget
+        self.q = nn.Linear(dim, dim, bias=False)
+        self.kv = nn.Linear(dim, 2 * self.width, bias=False)
+        self.index_q = nn.Linear(dim, index_heads * self.width, bias=False)
+        self.index_k = nn.Linear(dim, self.width, bias=False)  # one shared index key head
+        self.out = nn.Linear(dim, dim, bias=False)
+
+    def forward(self, x: Tensor) -> Tensor:
+        batch, time, dim = x.shape
+        q = self.q(x).view(batch, time, self.heads, self.width)
+        k, v = self.kv(x).chunk(2, dim=-1)
+        index_q = self.index_q(x).view(batch, time, -1, self.width)
+        index_k = self.index_k(x)
+
+        # Average raw keys first.  RoPE would be applied after this step in QSA,
+        # so a block does not average vectors with different rotary phases.
+        pad = (-time) % self.block_size
+        if pad:
+            index_k = torch.cat((index_k, torch.zeros(batch, pad, self.width, device=x.device, dtype=x.dtype)), dim=1)
+        block_k = index_k.view(batch, -1, self.block_size, self.width).mean(dim=2)
+        block_k = nn.functional.rms_norm(block_k, (self.width,))
+        index_q = nn.functional.rms_norm(index_q, (self.width,))
+
+        scores = torch.einsum("btjd,bmd->btmj", index_q, block_k).relu().sum(dim=-1)
+        positions = torch.arange(time, device=x.device)
+        block_ends = torch.arange(block_k.size(1), device=x.device) * self.block_size + self.block_size - 1
+        scores = scores.masked_fill(block_ends[None, None, :] > positions[None, :, None], float("-inf"))
+        blocks_to_keep = min((self.token_budget + self.block_size - 1) // self.block_size, block_k.size(1))
+        selected_scores, selected_blocks = scores.topk(blocks_to_keep, dim=-1)
+
+        # Expand selected blocks back to their original token indices for core attention.
+        offsets = torch.arange(self.block_size, device=x.device)
+        block_tokens = (selected_blocks[..., None] * self.block_size + offsets).flatten(-2)
+        block_valid = selected_scores.isfinite()[..., None].expand_as(selected_blocks[..., None]).reshape(batch, time, -1)
+        block_valid = block_valid & (block_tokens < time) & (block_tokens <= positions[None, :, None])
+
+        # Always retain the current incomplete block for local precision.
+        tail_start = (positions // self.block_size) * self.block_size
+        tail_tokens = tail_start[:, None] + offsets[None, :]
+        tail_tokens = tail_tokens[None].expand(batch, -1, -1)
+        tail_valid = (tail_tokens < time) & (tail_tokens <= positions[None, :, None])
+        indices = torch.cat((block_tokens, tail_tokens), dim=-1).clamp_max(time - 1)
+        valid = torch.cat((block_valid, tail_valid), dim=-1)
+        y = attend_selected(q, k, v, indices, valid)
+        return self.out(y.reshape(batch, time, dim))
+
+
 @dataclass
 class CSA2State:
     keys: Tensor
@@ -173,6 +233,7 @@ if __name__ == "__main__":
     assert DeepSeekSparseAttention(32)(x).shape == x.shape
     assert CompressedSparseAttention(32)(x).shape == x.shape
     assert HeavilyCompressedAttention(32, block_size=8)(x).shape == x.shape
+    assert QwenSparseAttention(32)(x).shape == x.shape
     layer = CSA2Layer(32)
     y, state = layer(x, "full")
     assert layer(y, "reindex", state)[0].shape == x.shape

@@ -25,8 +25,8 @@
             <p class="article-kicker">The mechanism that lets tokens consult one another.</p>
             <h1>Attention<br/><em>mechanisms</em></h1>
             <p class="article-dek">How a model chooses what to read: dense attention, KV-cache compression, sparse
-                long-context reads, and the layer-sharing designs behind Deepseek V4 and V4.1.</p>
-            <div class="article-meta"><span>25 min read</span><span>Updated Sep 2026</span></div>
+                long-context reads, and the layer-sharing designs behind DeepSeek and Qwen.</p>
+            <div class="article-meta"><span>29 min read</span><span>Updated Sep 2026</span></div>
         </header>
 
         <div class="article-layout">
@@ -39,6 +39,7 @@
                 <a href="#sparse">Sparse attention</a>
                 <a href="#dsa">DeepSeek Sparse Attention</a>
                 <a href="#csa">Compressed Sparse Attention</a>
+                <a href="#qsa">Qwen Sparse Attention</a>
                 <a href="#hca">Heavily Compressed Attention</a>
                 <a href="#csa2">CSA2</a>
                 <a href="#compare">Comparison</a>
@@ -259,7 +260,10 @@ class MultiHeadLatentAttention(nn.Module):
         return self.out(y)</code></pre>
 
                 <h2 id="sparse">Sparse attention</h2>
-                <p>Sparse attention is the general idea of not giving every query a full, expensive read of the past. A model first identifies a small candidate set, then uses normal attention on only those candidates. The candidates can be individual tokens, as in DSA, or learned blocks of tokens, as in CSA. This section introduces the principle before the specific DeepSeek designs that apply it.</p>
+                <p>Sparse attention is the general idea of not giving every query a full, expensive read of the past. A
+                    model first identifies a small candidate set, then uses normal attention on only those candidates.
+                    The candidates can be individual tokens, as in DSA, or learned blocks of tokens, as in CSA. This
+                    section introduces the principle before the specific DeepSeek designs that apply it.</p>
 
                 <h2 id="dsa">DeepSeek Sparse Attention <span>(DSA)</span></h2>
                 <p>DeepSeek-V3.2 is the first model in this sequence to make the <em>read pattern</em> sparse. MLA
@@ -313,7 +317,8 @@ score = (torch.einsum("btjd,bsjd-&gt;btsj", iq, ik).relu()
 score = score.masked_fill(future_mask, float("-inf"))
 indices = score.topk(top_k, dim=-1).indices
 output = attend_selected(q, k, v, indices)</code></pre>
-                <p>The complete runnable reference also handles causal validity for early tokens. It is available as <a href="reference_attention.py">reference_attention.py</a>.</p>
+                <p>The complete runnable reference also handles causal validity for early tokens. It is available as <a
+                        href="reference_attention.py">reference_attention.py</a>.</p>
                 <h3>What DSA saves, and what it still pays for</h3>
                 <p>Main attention now processes <em>k</em> values rather than the full length <em>L</em>, reducing that
                     part of the work from O(<em>L</em><sup>2</sup>) to O(<em>Lk</em>). The lightning indexer still
@@ -391,6 +396,66 @@ global_output = attend_selected(q, compressed_k, compressed_v, indices)</code></
                     argument, or the last tool result. The global path provides broad retrieval. The local path protects
                     short-range precision that aggressive compression can lose.</p>
 
+                <h2 id="qsa">Qwen Sparse Attention <span>(QSA)</span></h2>
+                <p>QSA is Qwen3.8-Flash-Next’s sparse attention mechanism. Like CSA, it first reduces the search space
+                    and then runs a more expensive read on selected material. The difference is where compression
+                    happens. CSA creates learned compressed keys and values that core attention reads directly. QSA uses
+                    a compressed representation only for the <em>indexer</em>. Once it selects a micro-block, main
+                    attention expands that block back into its original tokens and reads those token-level keys and
+                    values. <a href="#qsa-source">[QSA]</a></p>
+                <h3>1. Score blocks, not every token</h3>
+                <p>The QSA indexer first projects each token into a small shared key. It groups non-overlapping runs of
+                    <em>r</em> keys, averages each group, and normalises the result. Small query heads score these block
+                    keys. This changes the indexer’s sequence length from <em>n</em> token entries to about <em>n/r</em>
+                    block entries.</p>
+                <div class="attention-pipeline">
+                    <div><b>raw token keys</b><span>one per past token</span></div>
+                    <i>→</i>
+                    <div class="compress-node"><b>average micro-blocks</b><span>one index key per block</span></div>
+                    <i>→</i>
+                    <div class="select-node"><b>Top-K blocks</b><span>compressed MQA indexer</span></div>
+                    <i>→</i>
+                    <div><b>core attention</b><span>expanded token entries</span></div>
+                </div>
+                <p class="math-label">QSA BLOCK INDEXER</p>
+                <div class="equation compact-equation">k̂<sub>b</sub> = RMSNorm(AvgPool(k<sub>br :
+                    br+r−1</sub>))<br>I<sub>i,b</sub> = Σ<sub>h</sub> ReLU(⟨RoPE(q<sub>i</sub><sup>h</sup>, i),
+                    RoPE(k̂<sub>b</sub>, br)⟩)<br>B<sub>i</sub> = TopK<sub>⌈K/r⌉</sub>(I<sub>i,: </sub>)
+                </div>
+                <p>QSA applies RoPE after averaging a micro-block. That detail avoids averaging keys that already carry
+                    different rotary angles. The block receives one position, its first token position. A block may only
+                    be selected when its final token is in the query’s past. The unfinished current block is included
+                    directly, which preserves the most recent local context.</p>
+                <h3>2. Expand selected blocks back to precise token reads</h3>
+                <p>The selected block indices are expanded into their original token indices. Main attention then runs
+                    on those original token KVs, rather than on an averaged block value. QSA therefore loses detail only
+                    during retrieval. Once a block has passed the indexer, attention can still distinguish the
+                    individual words, code tokens, or image-related tokens inside it. This is its key difference from
+                    CSA and HCA.</p>
+                <div class="callout"><strong>DSA, CSA, and QSA select at different levels.</strong> DSA ranks individual
+                    cached token entries. CSA ranks learned block summaries and reads those summaries. QSA ranks
+                    averaged block keys, then reads the original tokens inside selected blocks. All three reduce the
+                    expensive core read, but QSA also reduces the indexer’s own long-context cost.
+                </div>
+                <h3>3. Train the selector before relying on it</h3>
+                <p>QSA is introduced through continued pre-training in two stages. Dense distillation teaches the block
+                    indexer to match a pooled version of the full-attention distribution. Sparse training then turns on
+                    Top-K block selection and updates the full model. This is the same broad safety principle as DSA,
+                    but QSA’s teacher and selection units are blocks rather than individual tokens.</p>
+                <p class="code-label">PYTORCH REFERENCE · QSA MICRO-BLOCK RETRIEVAL</p>
+                <pre><code># index_k is [B, T, d]. Average raw keys before applying position encoding.
+block_k = index_k.view(B, -1, block_size, d).mean(dim=2)
+scores = torch.einsum("btjd,bmd-&gt;btmj", index_q, block_k).relu().sum(-1)
+scores = scores.masked_fill(block_end_after_query, float("-inf"))
+selected_blocks = scores.topk(blocks_to_keep, dim=-1).indices
+
+# Expand each selected block to its source-token positions for core attention.
+token_indices = (selected_blocks[..., None] * block_size + offsets).flatten(-2)
+output = attend_selected(q, token_k, token_v, token_indices, valid_mask)</code></pre>
+                <p>The complete causal implementation, including the unfinished current block and validity masks, is
+                    available in <a href="reference_attention.py">reference_attention.py</a> as <code>QwenSparseAttention</code>.
+                </p>
+
                 <h2 id="hca">Heavily Compressed Attention <span>(HCA)</span></h2>
                 <p>HCA uses the same idea of learned sequence compression, but pushes it much harder. Its blocks are far
                     larger than CSA’s blocks, and it does not run Top-K retrieval after compression. Instead, attention
@@ -423,6 +488,11 @@ output = torch.einsum("bthr,brd-&gt;bthd", scores.softmax(-1), values)</code></p
                             <td><strong>CSA</strong></td>
                             <td>Top-K learned blocks, plus local tokens</td>
                             <td>token detail in global memory</td>
+                        </tr>
+                        <tr>
+                            <td><strong>QSA</strong></td>
+                            <td>Top-K blocks, expanded to original tokens</td>
+                            <td>full global reads and token-level indexing</td>
                         </tr>
                         <tr>
                             <td><strong>HCA</strong></td>
@@ -520,6 +590,12 @@ output = attend_selected(q, keys, values, indices)</code></pre>
                             <td>Million-token global retrieval</td>
                         </tr>
                         <tr>
+                            <td><strong>QSA</strong></td>
+                            <td>Token KV with compressed block index</td>
+                            <td>High</td>
+                            <td>Hybrid recurrent and sparse-attention models</td>
+                        </tr>
+                        <tr>
                             <td><strong>HCA</strong></td>
                             <td>Heavily compressed global sequence</td>
                             <td>High</td>
@@ -537,7 +613,8 @@ output = attend_selected(q, keys, values, indices)</code></pre>
                 <p>These mechanisms solve the same operational problem: keep decoding fast as a sequence grows. MHA
                     spends memory to maximise flexibility. MQA compresses decisively, GQA chooses a compromise, and MLA
                     learns a compact memory representation. DSA makes reads selective. CSA and HCA add learned sequence
-                    compression, while CSA2 avoids repeating retrieval work across layers. The best choice depends on
+                    compression. QSA compresses only the search index, then restores token detail for the selected read.
+                    CSA2 avoids repeating retrieval work across layers. The best choice depends on
                     context length, the architecture around attention, and the serving hardware.</p>
 
                 <hr/>
@@ -548,8 +625,10 @@ output = attend_selected(q, keys, values, indices)</code></pre>
                                                                                          href="https://arxiv.org/html/2512.02556">DeepSeek-V3.2:
                     DeepSeek Sparse Attention</a> · <a id="v4-source"
                                                        href="https://arxiv.org/html/2606.19348">DeepSeek-V4: Hybrid
-                    Attention with CSA and HCA</a> · <a id="v41-source"
-                                                        href="https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash">DeepSeek-V4.1-Flash:
+                    Attention with CSA and HCA</a> · <a id="qsa-source"
+                                                        href="https://arxiv.org/abs/2608.30320">Qwen3.8-Flash-Next: Qwen
+                    Sparse Attention</a> · <a id="v41-source"
+                                              href="https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash">DeepSeek-V4.1-Flash:
                     CSA2</a> · <a
                         href="../linear-attention-residuals/">Kimi Linear & Attention Residuals: sequence and
                     depth</a></p>
